@@ -10,7 +10,10 @@
   "scripts": {
     "fmt": "oxfmt index.ts",
     "lint": "oxlint index.ts",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "ci:fmt": "oxfmt --check index.ts",
+    "ci:lint": "npm run lint",
+    "ci:check": "npm run check"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "^0.0.37"
