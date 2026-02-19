@@ -9,6 +9,8 @@ Sandboxes pi like this:
 When a blocked action is attempted, the user is
 prompted to allow it temporarily or permanently rather than silently failing.
 
+![demo](./demo/demo.gif)
+
 ## Quickstart
 #### Install
 ```bash
