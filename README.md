@@ -1,8 +1,45 @@
 # pi-sandbox
 
-OS-level sandboxing for pi's bash tool, plus path policy enforcement for the
-read, write, and edit tools. When a blocked action is attempted, the user is
+Sandbox for [pi](https://pi.dev/).
+
+Sandboxes pi like this:
+- read/write/edit: direct control using allow/deny lists
+- bash: uses [Anthropic Sandbox Runtime](https://github.com/anthropic-experimental/sandbox-runtime) to control network and file system access
+
+When a blocked action is attempted, the user is
 prompted to allow it temporarily or permanently rather than silently failing.
+
+## Quickstart
+#### Install
+```bash
+pi install npm:pi-sandbox
+```
+
+#### Configure
+Add a config like this either to `~/.pi/agent` (global) or to `.pi/sandbox.json` (local).
+Local config takes precedence over global.
+
+```json
+{
+  "enabled": true,
+  "network": {
+    "allowedDomains": ["github.com", "*.github.com"],
+    "deniedDomains": []
+  },
+  "filesystem": {
+    "denyRead": ["~/.ssh", "~/.aws", "~/.gnupg"],
+    "allowWrite": [".", "/tmp"],
+    "denyWrite": [".env", ".env.*", "*.pem", "*.key"]
+  }
+}
+```
+
+#### Usage
+
+```
+pi --no-sandbox          disable sandboxing for the session
+/sandbox                 show current configuration and session allowances
+```
 
 ## What it does
 
@@ -39,56 +76,11 @@ If a path is added to `allowWrite` via a prompt but is also present in
 `denyWrite`, it remains blocked. A warning is shown explaining which config
 files to check.
 
-## Installation
-
-```bash
-pi install git:github.com/your-org/pi-sandbox
-```
-
-Or from a local path:
-
-```bash
-pi install ./path/to/sandbox
-```
-
-After installing, run `npm install` inside the extension directory to fetch the
-`@anthropic-ai/sandbox-runtime` dependency. On Linux, also install `bubblewrap`,
-`socat`, and `ripgrep`.
-
-## Configuration
-
-Two config files are merged, with the project file taking precedence:
-
-- `~/.pi/agent/sandbox.json` — global, applies to all projects
-- `.pi/sandbox.json` — project-local, overrides global
-
-```json
-{
-  "enabled": true,
-  "network": {
-    "allowedDomains": ["github.com", "*.github.com"],
-    "deniedDomains": []
-  },
-  "filesystem": {
-    "denyRead": ["~/.ssh", "~/.aws", "~/.gnupg"],
-    "allowWrite": [".", "/tmp"],
-    "denyWrite": [".env", ".env.*", "*.pem", "*.key"]
-  }
-}
-```
-
 `allowedDomains` supports `*.example.com` wildcards. `allowWrite` uses prefix
 matching, so `.` covers the entire current working directory. `denyWrite` takes
 precedence over `allowWrite`.
 
 If neither file exists, built-in defaults apply (see above for the defaults).
-
-## Usage
-
-```
-pi --no-sandbox          disable sandboxing for the session
-/sandbox                 show current configuration and session allowances
-```
 
 The footer shows a lock indicator while the sandbox is active.
 
