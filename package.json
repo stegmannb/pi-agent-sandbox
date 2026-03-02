@@ -3,7 +3,8 @@
   "version": "0.1.8",
   "description": "OS-level sandboxing for pi with interactive permission prompts",
   "keywords": [
-    "pi-package"
+    "pi-package",
+    "pi-extension"
   ],
   "type": "module",
   "pi": {
