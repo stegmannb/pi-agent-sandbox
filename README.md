@@ -21,6 +21,8 @@ pi install npm:pi-sandbox
 Add a config like this either to `~/.pi/agent` (global) or to `.pi/sandbox.json` (local).
 Local config takes precedence over global.
 
+Note below that the order of precedence for filesystem read and write are opposite.
+
 ```json
 {
   "enabled": true,
@@ -29,7 +31,15 @@ Local config takes precedence over global.
     "deniedDomains": []
   },
   "filesystem": {
-    "denyRead": ["~/.ssh", "~/.aws", "~/.gnupg"],
+    // For READS:
+    // - empty DENY means full system read access
+    // - ALLOW takes precedence
+    "denyRead": ["/Users", "/home"],
+    "allowRead": [".", "~/.config", "~/.local", "Library"],
+
+    // For WRITES:
+    // - empty ALLOW means no write access at all
+    // - DENY takes precedence
     "allowWrite": [".", "/tmp"],
     "denyWrite": [".env", ".env.*", "*.pem", "*.key"]
   }
@@ -70,7 +80,7 @@ extension reloads or pi restarts.
 |------|-----------|
 | Domain not in `allowedDomains` | Prompted (bash and `!cmd`) |
 | Path not in `allowWrite` | Prompted (write/edit tools and bash write failures) |
-| Path in `denyRead` | Hard-blocked, no prompt |
+| Path in `denyRead` (and not in `allowRead`) | Hard-blocked, no prompt |
 | Path in `denyWrite` | Hard-blocked, no prompt |
 | Domain in `deniedDomains` | Hard-blocked at OS level, no prompt |
 
@@ -79,8 +89,15 @@ If a path is added to `allowWrite` via a prompt but is also present in
 files to check.
 
 `allowedDomains` supports `*.example.com` wildcards. `allowWrite` uses prefix
-matching, so `.` covers the entire current working directory. `denyWrite` takes
-precedence over `allowWrite`.
+matching, so `.` covers the entire current working directory.
+
+> **⚠️ Read and write have opposite precedence rules:**
+>
+> - **Read:** `allowRead` takes precedence over `denyRead`. This lets you deny
+>   broad regions like `/Users` while re-allowing the workspace with
+>   `allowRead: ["."]`.
+> - **Write:** `denyWrite` takes precedence over `allowWrite`. A path in
+>   `denyWrite` is always blocked, even if it matches `allowWrite`.
 
 If neither file exists, built-in defaults apply (see above for the defaults).
 

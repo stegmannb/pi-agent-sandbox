@@ -5,7 +5,7 @@
  * Sandbox Extension - OS-level sandboxing for bash commands, plus path policy
  * enforcement for pi's read/write/edit tools, with interactive permission prompts.
  *
- * Uses @anthropic-ai/sandbox-runtime to enforce filesystem and network
+ * Uses @carderne/sandbox-runtime to enforce filesystem and network
  * restrictions on bash commands at the OS level (sandbox-exec on macOS,
  * bubblewrap on Linux). Also intercepts the read, write, and edit tools to
  * apply the same denyRead/denyWrite/allowWrite filesystem rules, which OS-level
@@ -21,10 +21,15 @@
  * What gets prompted vs. hard-blocked:
  *   - allowedDomains (network): prompted for bash and !cmd
  *   - allowWrite: prompted for write/edit tools and bash write failures
- *   - denyRead: always hard-blocked, no prompt
+ *   - denyRead: always hard-blocked, no prompt (but allowRead overrides it)
+ *   - allowRead: re-allows reads within denyRead regions (takes precedence)
  *   - denyWrite: always hard-blocked, no prompt (note shown if allowWrite was
  *     just granted but denyWrite still applies)
  *   - deniedDomains: always hard-blocked, no prompt
+ *
+ * IMPORTANT — precedence is intentionally opposite for read vs. write:
+ *   Read:  allowRead OVERRIDES denyRead  (most-specific allow wins)
+ *   Write: denyWrite OVERRIDES allowWrite (most-specific deny wins)
  *
  * Config files (merged, project takes precedence):
  * - ~/.pi/agent/sandbox.json (global)
@@ -39,7 +44,8 @@
  *     "deniedDomains": []
  *   },
  *   "filesystem": {
- *     "denyRead": ["~/.ssh", "~/.aws"],
+ *     "denyRead": ["/Users", "/home"],
+ *     "allowRead": [".", "~/.config", "~/.local", "Library"],
  *     "allowWrite": [".", "/tmp"],
  *     "denyWrite": [".env"]
  *   }
@@ -62,7 +68,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
+import { SandboxManager, type SandboxRuntimeConfig } from "@carderne/sandbox-runtime";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
   type BashOperations,
@@ -92,7 +98,8 @@ const DEFAULT_CONFIG: SandboxConfig = {
     deniedDomains: [],
   },
   filesystem: {
-    denyRead: ["~/.ssh", "~/.aws", "~/.gnupg"],
+    denyRead: ["/Users", "/home"],
+    allowRead: [".", "~/.config", "~/.local", "Library"],
     allowWrite: [".", "/tmp"],
     denyWrite: [".env", ".env.*", "*.pem", "*.key"],
   },
@@ -375,10 +382,12 @@ export default function (pi: ExtensionAPI) {
         },
         filesystem: {
           ...config.filesystem,
-          allowWrite: [...(config.filesystem?.allowWrite ?? []), ...sessionAllowedWritePaths],
           denyRead: config.filesystem?.denyRead ?? [],
+          allowRead: config.filesystem?.allowRead ?? [],
+          allowWrite: [...(config.filesystem?.allowWrite ?? []), ...sessionAllowedWritePaths],
           denyWrite: config.filesystem?.denyWrite ?? [],
         },
+        enableWeakerNetworkIsolation: true,
       });
     } catch (e) {
       console.error(`Warning: Failed to reinitialize sandbox: ${e}`);
@@ -562,9 +571,14 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // Path policy: denyRead — always hard-blocked, no prompt.
+    // Path policy: denyRead / allowRead — always hard-blocked, no prompt.
+    // NOTE: allowRead takes PRECEDENCE over denyRead (opposite of write, where
+    // denyWrite takes precedence over allowWrite). This lets you deny broad
+    // regions like "/Users" while re-allowing the workspace with allowRead: ["."].
     if (isToolCallEventType("read", event)) {
-      if (matchesPattern(event.input.path, config.filesystem?.denyRead ?? [])) {
+      const denyRead = config.filesystem?.denyRead ?? [];
+      const allowRead = config.filesystem?.allowRead ?? [];
+      if (matchesPattern(event.input.path, denyRead) && !matchesPattern(event.input.path, allowRead)) {
         return {
           block: true,
           reason: `Sandbox: read access denied for "${event.input.path}"`,
@@ -653,6 +667,7 @@ export default function (pi: ExtensionAPI) {
         filesystem: config.filesystem,
         ignoreViolations: configExt.ignoreViolations,
         enableWeakerNestedSandbox: configExt.enableWeakerNestedSandbox,
+        enableWeakerNetworkIsolation: true,
       });
 
       sandboxEnabled = true;
@@ -712,13 +727,15 @@ export default function (pi: ExtensionAPI) {
         "",
         "Filesystem (bash + read/write/edit tools):",
         `  Deny Read:   ${config.filesystem?.denyRead?.join(", ") || "(none)"}`,
+        `  Allow Read:  ${config.filesystem?.allowRead?.join(", ") || "(none)"}`,
         `  Allow Write: ${config.filesystem?.allowWrite?.join(", ") || "(none)"}`,
         `  Deny Write:  ${config.filesystem?.denyWrite?.join(", ") || "(none)"}`,
         ...(sessionAllowedWritePaths.length > 0
           ? [`  Session write: ${sessionAllowedWritePaths.join(", ")}`]
           : []),
         "",
-        "Note: denyWrite takes precedence over allowWrite.",
+        "Note: allowRead takes PRECEDENCE over denyRead (most-specific rule wins).",
+        "Note: denyWrite takes PRECEDENCE over allowWrite (opposite order from read).",
         "Note: denyRead and denyWrite are never prompted — they are always enforced.",
       ];
       ctx.ui.notify(lines.join("\n"), "info");
