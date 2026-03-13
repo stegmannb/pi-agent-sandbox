@@ -19,16 +19,12 @@
  *   (d) Allow for all projects       — written to ~/.pi/agent/sandbox.json
  *
  * What gets prompted vs. hard-blocked:
- *   - allowedDomains (network): prompted for bash and !cmd
- *   - allowWrite: prompted for write/edit tools and bash write failures
- *   - denyRead: always hard-blocked, no prompt (but allowRead overrides it)
- *   - allowRead: re-allows reads within denyRead regions (takes precedence)
- *   - denyWrite: always hard-blocked, no prompt (note shown if allowWrite was
- *     just granted but denyWrite still applies)
- *   - deniedDomains: always hard-blocked, no prompt
+ *   - domains: prompted if not whitelisted nor explicitly denied
+ *   - write: prompted if not whitelisted nor explicitly denied
+ *   - read: always prompted (because denyRead is used for broad block, may want to punch holes)
  *
- * IMPORTANT — precedence is intentionally opposite for read vs. write:
- *   Read:  allowRead OVERRIDES denyRead  (most-specific allow wins)
+ * IMPORTANT — precedence for read:
+ *   Read:  allowRead OVERRIDES denyRead (prompt grant adds to allowRead)
  *   Write: denyWrite OVERRIDES allowWrite (most-specific deny wins)
  *
  * Config files (merged, project takes precedence):
@@ -248,6 +244,21 @@ function addDomainToConfig(configPath: string, domain: string): void {
   }
 }
 
+function addReadPathToConfig(configPath: string, pathToAdd: string): void {
+  const config = readOrEmptyConfig(configPath);
+  const existing = config.filesystem?.allowRead ?? [];
+  if (!existing.includes(pathToAdd)) {
+    config.filesystem = {
+      ...config.filesystem,
+      allowRead: [...existing, pathToAdd],
+      denyRead: config.filesystem?.denyRead ?? [],
+      allowWrite: config.filesystem?.allowWrite ?? [],
+      denyWrite: config.filesystem?.denyWrite ?? [],
+    };
+    writeConfigFile(configPath, config);
+  }
+}
+
 function addWritePathToConfig(configPath: string, pathToAdd: string): void {
   const config = readOrEmptyConfig(configPath);
   const existing = config.filesystem?.allowWrite ?? [];
@@ -351,6 +362,7 @@ export default function (pi: ExtensionAPI) {
   // Session-temporary allowances — held in JS memory, not accessible by the agent.
   // These are added on top of whatever is in the config files.
   const sessionAllowedDomains: string[] = [];
+  const sessionAllowedReadPaths: string[] = [];
   const sessionAllowedWritePaths: string[] = [];
 
   // ── Effective config helpers ────────────────────────────────────────────────
@@ -358,6 +370,11 @@ export default function (pi: ExtensionAPI) {
   function getEffectiveAllowedDomains(cwd: string): string[] {
     const config = loadConfig(cwd);
     return [...(config.network?.allowedDomains ?? []), ...sessionAllowedDomains];
+  }
+
+  function getEffectiveAllowRead(cwd: string): string[] {
+    const config = loadConfig(cwd);
+    return [...(config.filesystem?.allowRead ?? []), ...sessionAllowedReadPaths];
   }
 
   function getEffectiveAllowWrite(cwd: string): string[] {
@@ -413,6 +430,23 @@ export default function (pi: ExtensionAPI) {
     return "global";
   }
 
+  async function promptReadBlock(
+    ctx: ExtensionContext,
+    filePath: string,
+  ): Promise<"abort" | "session" | "project" | "global"> {
+    if (!ctx.hasUI) return "abort";
+    const choice = await ctx.ui.select(`📖 Read blocked: "${filePath}" is not in allowRead`, [
+      "Abort (keep blocked)",
+      "Allow for this session only",
+      "Allow for this project  →  .pi/sandbox.json",
+      "Allow for all projects  →  ~/.pi/agent/sandbox.json",
+    ]);
+    if (!choice || choice.startsWith("Abort")) return "abort";
+    if (choice.startsWith("Allow for this session")) return "session";
+    if (choice.startsWith("Allow for this project")) return "project";
+    return "global";
+  }
+
   async function promptWriteBlock(
     ctx: ExtensionContext,
     filePath: string,
@@ -441,6 +475,18 @@ export default function (pi: ExtensionAPI) {
     if (!sessionAllowedDomains.includes(domain)) sessionAllowedDomains.push(domain);
     if (choice === "project") addDomainToConfig(projectPath, domain);
     if (choice === "global") addDomainToConfig(globalPath, domain);
+    await reinitializeSandbox(cwd);
+  }
+
+  async function applyReadChoice(
+    choice: "session" | "project" | "global",
+    filePath: string,
+    cwd: string,
+  ): Promise<void> {
+    const { globalPath, projectPath } = getConfigPaths(cwd);
+    if (!sessionAllowedReadPaths.includes(filePath)) sessionAllowedReadPaths.push(filePath);
+    if (choice === "project") addReadPathToConfig(projectPath, filePath);
+    if (choice === "global") addReadPathToConfig(globalPath, filePath);
     await reinitializeSandbox(cwd);
   }
 
@@ -571,21 +617,27 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // Path policy: denyRead / allowRead — always hard-blocked, no prompt.
-    // NOTE: allowRead takes PRECEDENCE over denyRead (opposite of write, where
-    // denyWrite takes precedence over allowWrite). This lets you deny broad
-    // regions like "/Users" while re-allowing the workspace with allowRead: ["."].
+    // Path policy: read tool.
+    //   - If the path is already in effectiveAllowRead, allow silently.
+    //   - Otherwise always prompt, regardless of denyRead.
+    //   - Granting (session or permanent) adds to allowRead, which overrides denyRead.
+    //   - denyRead is never a hard-block on its own — it just sets the default
+    //     denied state that the prompt can override.
     if (isToolCallEventType("read", event)) {
-      const denyRead = config.filesystem?.denyRead ?? [];
-      const allowRead = config.filesystem?.allowRead ?? [];
-      if (
-        matchesPattern(event.input.path, denyRead) &&
-        !matchesPattern(event.input.path, allowRead)
-      ) {
-        return {
-          block: true,
-          reason: `Sandbox: read access denied for "${event.input.path}"`,
-        };
+      const filePath = event.input.path;
+      const effectiveAllowRead = getEffectiveAllowRead(ctx.cwd);
+
+      if (!matchesPattern(filePath, effectiveAllowRead)) {
+        const choice = await promptReadBlock(ctx, filePath);
+        if (choice === "abort") {
+          return {
+            block: true,
+            reason: `Sandbox: read access denied for "${filePath}"`,
+          };
+        }
+        await applyReadChoice(choice, filePath, ctx.cwd);
+        // Allowed — fall through, tool runs.
+        return;
       }
     }
 
@@ -745,13 +797,16 @@ export default function (pi: ExtensionAPI) {
         `  Allow Read:  ${config.filesystem?.allowRead?.join(", ") || "(none)"}`,
         `  Allow Write: ${config.filesystem?.allowWrite?.join(", ") || "(none)"}`,
         `  Deny Write:  ${config.filesystem?.denyWrite?.join(", ") || "(none)"}`,
+        ...(sessionAllowedReadPaths.length > 0
+          ? [`  Session read:  ${sessionAllowedReadPaths.join(", ")}`]
+          : []),
         ...(sessionAllowedWritePaths.length > 0
           ? [`  Session write: ${sessionAllowedWritePaths.join(", ")}`]
           : []),
         "",
-        "Note: allowRead takes PRECEDENCE over denyRead (most-specific rule wins).",
-        "Note: denyWrite takes PRECEDENCE over allowWrite (opposite order from read).",
-        "Note: denyRead and denyWrite are never prompted — they are always enforced.",
+        "Note: ALL reads are prompted unless the path is already in allowRead.",
+        "Note: denyRead is not a hard-block — granting a prompt adds to allowRead, overriding denyRead.",
+        "Note: denyWrite takes PRECEDENCE over allowWrite and is never prompted.",
       ];
       ctx.ui.notify(lines.join("\n"), "info");
     },
