@@ -141,10 +141,12 @@ function deepMerge(base: SandboxConfig, overrides: Partial<SandboxConfig>): Sand
   const extOverrides = overrides as {
     ignoreViolations?: Record<string, string[]>;
     enableWeakerNestedSandbox?: boolean;
+    allowBrowserProcess?: boolean;
   };
   const extResult = result as {
     ignoreViolations?: Record<string, string[]>;
     enableWeakerNestedSandbox?: boolean;
+    allowBrowserProcess?: boolean;
   };
 
   if (extOverrides.ignoreViolations) {
@@ -152,6 +154,9 @@ function deepMerge(base: SandboxConfig, overrides: Partial<SandboxConfig>): Sand
   }
   if (extOverrides.enableWeakerNestedSandbox !== undefined) {
     extResult.enableWeakerNestedSandbox = extOverrides.enableWeakerNestedSandbox;
+  }
+  if (extOverrides.allowBrowserProcess !== undefined) {
+    extResult.allowBrowserProcess = extOverrides.allowBrowserProcess;
   }
 
   return result;
@@ -389,6 +394,7 @@ export default function (pi: ExtensionAPI) {
   async function reinitializeSandbox(cwd: string): Promise<void> {
     if (!sandboxInitialized) return;
     const config = loadConfig(cwd);
+    const configExt = config as unknown as { allowBrowserProcess?: boolean };
     try {
       await SandboxManager.reset();
       await SandboxManager.initialize({
@@ -404,6 +410,7 @@ export default function (pi: ExtensionAPI) {
           allowWrite: [...(config.filesystem?.allowWrite ?? []), ...sessionAllowedWritePaths],
           denyWrite: config.filesystem?.denyWrite ?? [],
         },
+        allowBrowserProcess: configExt.allowBrowserProcess,
         enableWeakerNetworkIsolation: true,
       });
     } catch (e) {
@@ -715,6 +722,7 @@ export default function (pi: ExtensionAPI) {
       const configExt = config as unknown as {
         ignoreViolations?: Record<string, string[]>;
         enableWeakerNestedSandbox?: boolean;
+        allowBrowserProcess?: boolean;
       };
 
       await SandboxManager.initialize({
@@ -722,6 +730,7 @@ export default function (pi: ExtensionAPI) {
         filesystem: config.filesystem,
         ignoreViolations: configExt.ignoreViolations,
         enableWeakerNestedSandbox: configExt.enableWeakerNestedSandbox,
+        allowBrowserProcess: configExt.allowBrowserProcess,
         enableWeakerNetworkIsolation: true,
       });
 
