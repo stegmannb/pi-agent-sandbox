@@ -11,6 +11,11 @@ prompted to allow it temporarily or permanently rather than silently failing.
 
 ![demo](./demo/demo.gif)
 
+## Notes
+- Does not currently work with [agent-browser](https://agent-browser.dev/). Two options:
+  - Temporarily disable the sandbox with `/sandbox-disable` while you use it, then `/sandbox-enable`
+  - Add `"allowBrowserProcess": true` to your `sandbox.json`, then add then add the contents of [agent-browser-compat.md](./agent-browser-compat.md) to your agent-browser/SKILL.md.
+
 ## Quickstart
 #### Install
 ```bash

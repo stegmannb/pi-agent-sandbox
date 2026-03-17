@@ -778,6 +778,82 @@ export default function (pi: ExtensionAPI) {
 
   // ── /sandbox command ────────────────────────────────────────────────────────
 
+  pi.registerCommand("sandbox-enable", {
+    description: "Enable the sandbox for this session",
+    handler: async (_args, ctx) => {
+      if (sandboxEnabled) {
+        ctx.ui.notify("Sandbox is already enabled", "info");
+        return;
+      }
+
+      const config = loadConfig(ctx.cwd);
+      const platform = process.platform;
+      if (platform !== "darwin" && platform !== "linux") {
+        ctx.ui.notify(`Sandbox not supported on ${platform}`, "warning");
+        return;
+      }
+
+      try {
+        const configExt = config as unknown as {
+          ignoreViolations?: Record<string, string[]>;
+          enableWeakerNestedSandbox?: boolean;
+          allowBrowserProcess?: boolean;
+        };
+
+        await SandboxManager.initialize({
+          network: config.network,
+          filesystem: config.filesystem,
+          ignoreViolations: configExt.ignoreViolations,
+          enableWeakerNestedSandbox: configExt.enableWeakerNestedSandbox,
+          allowBrowserProcess: configExt.allowBrowserProcess,
+          enableWeakerNetworkIsolation: true,
+        });
+
+        sandboxEnabled = true;
+        sandboxInitialized = true;
+
+        const networkCount = config.network?.allowedDomains?.length ?? 0;
+        const writeCount = config.filesystem?.allowWrite?.length ?? 0;
+        ctx.ui.setStatus(
+          "sandbox",
+          ctx.ui.theme.fg(
+            "accent",
+            `🔒 Sandbox: ${networkCount} domains, ${writeCount} write paths`,
+          ),
+        );
+        ctx.ui.notify("Sandbox enabled", "info");
+      } catch (err) {
+        ctx.ui.notify(
+          `Sandbox initialization failed: ${err instanceof Error ? err.message : err}`,
+          "error",
+        );
+      }
+    },
+  });
+
+  pi.registerCommand("sandbox-disable", {
+    description: "Disable the sandbox for this session",
+    handler: async (_args, ctx) => {
+      if (!sandboxEnabled) {
+        ctx.ui.notify("Sandbox is already disabled", "info");
+        return;
+      }
+
+      if (sandboxInitialized) {
+        try {
+          await SandboxManager.reset();
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+
+      sandboxEnabled = false;
+      sandboxInitialized = false;
+      ctx.ui.setStatus("sandbox", "");
+      ctx.ui.notify("Sandbox disabled", "info");
+    },
+  });
+
   pi.registerCommand("sandbox", {
     description: "Show sandbox configuration",
     handler: async (_args, ctx) => {
