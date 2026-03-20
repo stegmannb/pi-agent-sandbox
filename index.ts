@@ -282,7 +282,7 @@ function addWritePathToConfig(configPath: string, pathToAdd: string): void {
 
 function createSandboxedBashOps(): BashOperations {
   return {
-    async exec(command, cwd, { onData, signal, timeout }) {
+    async exec(command, cwd, { onData, signal, timeout, env }) {
       if (!existsSync(cwd)) {
         throw new Error(`Working directory does not exist: ${cwd}`);
       }
@@ -292,6 +292,7 @@ function createSandboxedBashOps(): BashOperations {
       return new Promise((resolve, reject) => {
         const child = spawn("bash", ["-c", wrappedCommand], {
           cwd,
+          env,
           detached: true,
           stdio: ["ignore", "pipe", "pipe"],
         });
