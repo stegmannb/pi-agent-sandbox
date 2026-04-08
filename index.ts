@@ -82,6 +82,86 @@ interface SandboxConfig extends SandboxRuntimeConfig {
   enabled?: boolean;
 }
 
+/**
+ * Validate a parsed sandbox config object and throw a descriptive error if
+ * any field has the wrong type.  Called after JSON.parse so that structural
+ * issues surface immediately instead of being silently ignored.
+ */
+function validateConfig(raw: unknown, filePath: string): Partial<SandboxConfig> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new Error(
+      `Invalid sandbox config in "${filePath}": expected a JSON object at the top level.`,
+    );
+  }
+
+  const obj = raw as Record<string, unknown>;
+
+  if ("enabled" in obj && typeof obj["enabled"] !== "boolean") {
+    throw new Error(
+      `Invalid sandbox config in "${filePath}": "enabled" must be a boolean, got ${JSON.stringify(obj["enabled"])}.`,
+    );
+  }
+
+  if ("network" in obj) {
+    const net = obj["network"];
+    if (typeof net !== "object" || net === null || Array.isArray(net)) {
+      throw new Error(
+        `Invalid sandbox config in "${filePath}": "network" must be an object.`,
+      );
+    }
+    const netObj = net as Record<string, unknown>;
+    for (const key of ["allowedDomains", "deniedDomains"] as const) {
+      if (key in netObj && !Array.isArray(netObj[key])) {
+        throw new Error(
+          `Invalid sandbox config in "${filePath}": "network.${key}" must be an array.`,
+        );
+      }
+      if (Array.isArray(netObj[key])) {
+        for (const entry of netObj[key] as unknown[]) {
+          if (typeof entry !== "string") {
+            throw new Error(
+              `Invalid sandbox config in "${filePath}": every entry in "network.${key}" must be a string, got ${JSON.stringify(entry)}.`,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  if ("filesystem" in obj) {
+    const fs = obj["filesystem"];
+    if (typeof fs !== "object" || fs === null || Array.isArray(fs)) {
+      throw new Error(
+        `Invalid sandbox config in "${filePath}": "filesystem" must be an object.`,
+      );
+    }
+    const fsObj = fs as Record<string, unknown>;
+    for (const key of [
+      "denyRead",
+      "allowRead",
+      "allowWrite",
+      "denyWrite",
+    ] as const) {
+      if (key in fsObj && !Array.isArray(fsObj[key])) {
+        throw new Error(
+          `Invalid sandbox config in "${filePath}": "filesystem.${key}" must be an array.`,
+        );
+      }
+      if (Array.isArray(fsObj[key])) {
+        for (const entry of fsObj[key] as unknown[]) {
+          if (typeof entry !== "string") {
+            throw new Error(
+              `Invalid sandbox config in "${filePath}": every entry in "filesystem.${key}" must be a string, got ${JSON.stringify(entry)}.`,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  return raw as Partial<SandboxConfig>;
+}
+
 const DEFAULT_CONFIG: SandboxConfig = {
   enabled: true,
   network: {
@@ -115,19 +195,13 @@ function loadConfig(cwd: string): SandboxConfig {
   let projectConfig: Partial<SandboxConfig> = {};
 
   if (existsSync(globalConfigPath)) {
-    try {
-      globalConfig = JSON.parse(readFileSync(globalConfigPath, "utf-8"));
-    } catch (e) {
-      console.error(`Warning: Could not parse ${globalConfigPath}: ${e}`);
-    }
+    const raw = JSON.parse(readFileSync(globalConfigPath, "utf-8"));
+    globalConfig = validateConfig(raw, globalConfigPath);
   }
 
   if (existsSync(projectConfigPath)) {
-    try {
-      projectConfig = JSON.parse(readFileSync(projectConfigPath, "utf-8"));
-    } catch (e) {
-      console.error(`Warning: Could not parse ${projectConfigPath}: ${e}`);
-    }
+    const raw = JSON.parse(readFileSync(projectConfigPath, "utf-8"));
+    projectConfig = validateConfig(raw, projectConfigPath);
   }
 
   return deepMerge(deepMerge(DEFAULT_CONFIG, globalConfig), projectConfig);
@@ -264,11 +338,8 @@ function getConfigPaths(cwd: string): {
 
 function readOrEmptyConfig(configPath: string): Partial<SandboxConfig> {
   if (!existsSync(configPath)) return {};
-  try {
-    return JSON.parse(readFileSync(configPath, "utf-8"));
-  } catch {
-    return {};
-  }
+  const raw = JSON.parse(readFileSync(configPath, "utf-8"));
+  return validateConfig(raw, configPath);
 }
 
 function writeConfigFile(
@@ -784,7 +855,17 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const config = loadConfig(ctx.cwd);
+    let config: SandboxConfig;
+    try {
+      config = loadConfig(ctx.cwd);
+    } catch (err) {
+      sandboxEnabled = false;
+      ctx.ui.notify(
+        `Sandbox config error — sandbox disabled: ${err instanceof Error ? err.message : err}`,
+        "error",
+      );
+      return;
+    }
 
     if (!config.enabled) {
       sandboxEnabled = false;
@@ -870,7 +951,17 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      const config = loadConfig(ctx.cwd);
+      let config: SandboxConfig;
+      try {
+        config = loadConfig(ctx.cwd);
+      } catch (err) {
+        ctx.ui.notify(
+          `Sandbox config error — cannot enable: ${err instanceof Error ? err.message : err}`,
+          "error",
+        );
+        return;
+      }
+
       const platform = process.platform;
       if (platform !== "darwin" && platform !== "linux") {
         ctx.ui.notify(`Sandbox not supported on ${platform}`, "warning");
