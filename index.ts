@@ -64,14 +64,8 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import {
-  SandboxManager,
-  type SandboxRuntimeConfig,
-} from "@anthropic-ai/sandbox-runtime";
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
+import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
   type BashOperations,
   createBashTool,
@@ -133,10 +127,7 @@ function loadConfig(cwd: string): SandboxConfig {
   return deepMerge(deepMerge(DEFAULT_CONFIG, globalConfig), projectConfig);
 }
 
-function deepMerge(
-  base: SandboxConfig,
-  overrides: Partial<SandboxConfig>,
-): SandboxConfig {
+function deepMerge(base: SandboxConfig, overrides: Partial<SandboxConfig>): SandboxConfig {
   const result: SandboxConfig = { ...base };
 
   if (overrides.enabled !== undefined) result.enabled = overrides.enabled;
@@ -162,8 +153,7 @@ function deepMerge(
     extResult.ignoreViolations = extOverrides.ignoreViolations;
   }
   if (extOverrides.enableWeakerNestedSandbox !== undefined) {
-    extResult.enableWeakerNestedSandbox =
-      extOverrides.enableWeakerNestedSandbox;
+    extResult.enableWeakerNestedSandbox = extOverrides.enableWeakerNestedSandbox;
   }
   if (extOverrides.allowBrowserProcess !== undefined) {
     extResult.allowBrowserProcess = extOverrides.allowBrowserProcess;
@@ -200,9 +190,7 @@ function domainIsAllowed(domain: string, allowedDomains: string[]): boolean {
 
 /** Extract a path from a bash "Operation not permitted" OS sandbox error. */
 function extractBlockedWritePath(output: string): string | null {
-  const match = output.match(
-    /(?:\/bin\/bash|bash|sh): (\/[^\s:]+): Operation not permitted/,
-  );
+  const match = output.match(/(?:\/bin\/bash|bash|sh): (\/[^\s:]+): Operation not permitted/);
   return match ? match[1] : null;
 }
 
@@ -215,9 +203,7 @@ function matchesPattern(filePath: string, patterns: string[]): boolean {
     const expandedP = p.replace(/^~/, homedir());
     const absP = resolve(expandedP);
     if (p.includes("*")) {
-      const escaped = absP
-        .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-        .replace(/\*/g, ".*");
+      const escaped = absP.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
       return new RegExp(`^${escaped}$`).test(abs);
     }
     return abs === absP || abs.startsWith(absP + "/");
@@ -245,10 +231,7 @@ function readOrEmptyConfig(configPath: string): Partial<SandboxConfig> {
   }
 }
 
-function writeConfigFile(
-  configPath: string,
-  config: Partial<SandboxConfig>,
-): void {
+function writeConfigFile(configPath: string, config: Partial<SandboxConfig>): void {
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
 }
@@ -392,26 +375,17 @@ export default function (pi: ExtensionAPI) {
 
   function getEffectiveAllowedDomains(cwd: string): string[] {
     const config = loadConfig(cwd);
-    return [
-      ...(config.network?.allowedDomains ?? []),
-      ...sessionAllowedDomains,
-    ];
+    return [...(config.network?.allowedDomains ?? []), ...sessionAllowedDomains];
   }
 
   function getEffectiveAllowRead(cwd: string): string[] {
     const config = loadConfig(cwd);
-    return [
-      ...(config.filesystem?.allowRead ?? []),
-      ...sessionAllowedReadPaths,
-    ];
+    return [...(config.filesystem?.allowRead ?? []), ...sessionAllowedReadPaths];
   }
 
   function getEffectiveAllowWrite(cwd: string): string[] {
     const config = loadConfig(cwd);
-    return [
-      ...(config.filesystem?.allowWrite ?? []),
-      ...sessionAllowedWritePaths,
-    ];
+    return [...(config.filesystem?.allowWrite ?? []), ...sessionAllowedWritePaths];
   }
 
   // ── Sandbox reinitialize ────────────────────────────────────────────────────
@@ -426,20 +400,14 @@ export default function (pi: ExtensionAPI) {
       await SandboxManager.initialize({
         network: {
           ...config.network,
-          allowedDomains: [
-            ...(config.network?.allowedDomains ?? []),
-            ...sessionAllowedDomains,
-          ],
+          allowedDomains: [...(config.network?.allowedDomains ?? []), ...sessionAllowedDomains],
           deniedDomains: config.network?.deniedDomains ?? [],
         },
         filesystem: {
           ...config.filesystem,
           denyRead: config.filesystem?.denyRead ?? [],
           allowRead: config.filesystem?.allowRead ?? [],
-          allowWrite: [
-            ...(config.filesystem?.allowWrite ?? []),
-            ...sessionAllowedWritePaths,
-          ],
+          allowWrite: [...(config.filesystem?.allowWrite ?? []), ...sessionAllowedWritePaths],
           denyWrite: config.filesystem?.denyWrite ?? [],
         },
         enableWeakerNetworkIsolation: true,
@@ -456,15 +424,12 @@ export default function (pi: ExtensionAPI) {
     domain: string,
   ): Promise<"abort" | "session" | "project" | "global"> {
     if (!ctx.hasUI) return "abort";
-    const choice = await ctx.ui.select(
-      `🌐 Network blocked: "${domain}" is not in allowedDomains`,
-      [
-        "Abort (keep blocked)",
-        "Allow for this session only",
-        "Allow for this project  →  .pi/sandbox.json",
-        "Allow for all projects  →  ~/.pi/agent/sandbox.json",
-      ],
-    );
+    const choice = await ctx.ui.select(`🌐 Network blocked: "${domain}" is not in allowedDomains`, [
+      "Abort (keep blocked)",
+      "Allow for this session only",
+      "Allow for this project  →  .pi/sandbox.json",
+      "Allow for all projects  →  ~/.pi/agent/sandbox.json",
+    ]);
     if (!choice || choice.startsWith("Abort")) return "abort";
     if (choice.startsWith("Allow for this session")) return "session";
     if (choice.startsWith("Allow for this project")) return "project";
@@ -476,15 +441,12 @@ export default function (pi: ExtensionAPI) {
     filePath: string,
   ): Promise<"abort" | "session" | "project" | "global"> {
     if (!ctx.hasUI) return "abort";
-    const choice = await ctx.ui.select(
-      `📖 Read blocked: "${filePath}" is not in allowRead`,
-      [
-        "Abort (keep blocked)",
-        "Allow for this session only",
-        "Allow for this project  →  .pi/sandbox.json",
-        "Allow for all projects  →  ~/.pi/agent/sandbox.json",
-      ],
-    );
+    const choice = await ctx.ui.select(`📖 Read blocked: "${filePath}" is not in allowRead`, [
+      "Abort (keep blocked)",
+      "Allow for this session only",
+      "Allow for this project  →  .pi/sandbox.json",
+      "Allow for all projects  →  ~/.pi/agent/sandbox.json",
+    ]);
     if (!choice || choice.startsWith("Abort")) return "abort";
     if (choice.startsWith("Allow for this session")) return "session";
     if (choice.startsWith("Allow for this project")) return "project";
@@ -496,15 +458,12 @@ export default function (pi: ExtensionAPI) {
     filePath: string,
   ): Promise<"abort" | "session" | "project" | "global"> {
     if (!ctx.hasUI) return "abort";
-    const choice = await ctx.ui.select(
-      `📝 Write blocked: "${filePath}" is not in allowWrite`,
-      [
-        "Abort (keep blocked)",
-        "Allow for this session only",
-        "Allow for this project  →  .pi/sandbox.json",
-        "Allow for all projects  →  ~/.pi/agent/sandbox.json",
-      ],
-    );
+    const choice = await ctx.ui.select(`📝 Write blocked: "${filePath}" is not in allowWrite`, [
+      "Abort (keep blocked)",
+      "Allow for this session only",
+      "Allow for this project  →  .pi/sandbox.json",
+      "Allow for all projects  →  ~/.pi/agent/sandbox.json",
+    ]);
     if (!choice || choice.startsWith("Abort")) return "abort";
     if (choice.startsWith("Allow for this session")) return "session";
     if (choice.startsWith("Allow for this project")) return "project";
@@ -519,8 +478,7 @@ export default function (pi: ExtensionAPI) {
     cwd: string,
   ): Promise<void> {
     const { globalPath, projectPath } = getConfigPaths(cwd);
-    if (!sessionAllowedDomains.includes(domain))
-      sessionAllowedDomains.push(domain);
+    if (!sessionAllowedDomains.includes(domain)) sessionAllowedDomains.push(domain);
     if (choice === "project") addDomainToConfig(projectPath, domain);
     if (choice === "global") addDomainToConfig(globalPath, domain);
     await reinitializeSandbox(cwd);
@@ -532,8 +490,7 @@ export default function (pi: ExtensionAPI) {
     cwd: string,
   ): Promise<void> {
     const { globalPath, projectPath } = getConfigPaths(cwd);
-    if (!sessionAllowedReadPaths.includes(filePath))
-      sessionAllowedReadPaths.push(filePath);
+    if (!sessionAllowedReadPaths.includes(filePath)) sessionAllowedReadPaths.push(filePath);
     if (choice === "project") addReadPathToConfig(projectPath, filePath);
     if (choice === "global") addReadPathToConfig(globalPath, filePath);
     await reinitializeSandbox(cwd);
@@ -545,8 +502,7 @@ export default function (pi: ExtensionAPI) {
     cwd: string,
   ): Promise<void> {
     const { globalPath, projectPath } = getConfigPaths(cwd);
-    if (!sessionAllowedWritePaths.includes(filePath))
-      sessionAllowedWritePaths.push(filePath);
+    if (!sessionAllowedWritePaths.includes(filePath)) sessionAllowedWritePaths.push(filePath);
     if (choice === "project") addWritePathToConfig(projectPath, filePath);
     if (choice === "global") addWritePathToConfig(globalPath, filePath);
     await reinitializeSandbox(cwd);
@@ -586,9 +542,7 @@ export default function (pi: ExtensionAPI) {
             // Check if denyWrite would still block it even after allowing.
             const config = loadConfig(ctx.cwd);
             const { projectPath, globalPath } = getConfigPaths(ctx.cwd);
-            if (
-              matchesPattern(blockedPath, config.filesystem?.denyWrite ?? [])
-            ) {
+            if (matchesPattern(blockedPath, config.filesystem?.denyWrite ?? [])) {
               ctx.ui.notify(
                 `⚠️ "${blockedPath}" was added to allowWrite, but it is also in denyWrite and will remain blocked.\n` +
                   `Check denyWrite in:\n  ${projectPath}\n  ${globalPath}`,
@@ -652,11 +606,7 @@ export default function (pi: ExtensionAPI) {
     const { projectPath, globalPath } = getConfigPaths(ctx.cwd);
 
     // Network pre-check for bash tool calls.
-    if (
-      sandboxEnabled &&
-      sandboxInitialized &&
-      isToolCallEventType("bash", event)
-    ) {
+    if (sandboxEnabled && sandboxInitialized && isToolCallEventType("bash", event)) {
       const domains = extractDomainsFromCommand(event.input.command);
       const effectiveDomains = getEffectiveAllowedDomains(ctx.cwd);
       for (const domain of domains) {
@@ -698,10 +648,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     // Path policy: write/edit — prompt for allowWrite, hard-block for denyWrite.
-    if (
-      isToolCallEventType("write", event) ||
-      isToolCallEventType("edit", event)
-    ) {
+    if (isToolCallEventType("write", event) || isToolCallEventType("edit", event)) {
       const path = (event.input as { path: string }).path;
       const allowWrite = getEffectiveAllowWrite(ctx.cwd);
       const denyWrite = config.filesystem?.denyWrite ?? [];
@@ -793,9 +740,7 @@ export default function (pi: ExtensionAPI) {
       const nodeMajor = parseInt(process.versions.node.split(".")[0], 10);
       if (nodeMajor >= 22) {
         const existing = process.env.NODE_OPTIONS ?? "";
-        process.env.NODE_OPTIONS = existing
-          ? `${existing} --use-env-proxy`
-          : "--use-env-proxy";
+        process.env.NODE_OPTIONS = existing ? `${existing} --use-env-proxy` : "--use-env-proxy";
       }
 
       sandboxEnabled = true;
@@ -805,10 +750,7 @@ export default function (pi: ExtensionAPI) {
       const writeCount = config.filesystem?.allowWrite?.length ?? 0;
       ctx.ui.setStatus(
         "sandbox",
-        ctx.ui.theme.fg(
-          "accent",
-          `🔒 Sandbox: ${networkCount} domains, ${writeCount} write paths`,
-        ),
+        ctx.ui.theme.fg("accent", `🔒 Sandbox: ${networkCount} domains, ${writeCount} write paths`),
       );
     } catch (err) {
       sandboxEnabled = false;
