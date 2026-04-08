@@ -3,6 +3,7 @@
 Sandbox for [pi](https://pi.dev/).
 
 Sandboxes pi like this:
+
 - read/write/edit: direct control using allow/deny lists
 - bash: uses [Anthropic Sandbox Runtime](https://github.com/anthropic-experimental/sandbox-runtime) to control network and file system access
 
@@ -12,6 +13,7 @@ prompted to allow it temporarily or permanently rather than silently failing.
 ![demo](./demo/demo.gif)
 
 ## Notes
+
 There is an example config at [sandbox.json](./sandbox.json). It was quite a few things added to get this extension to work with [agent-browser](https://agent-browser.dev/) and other common tools.
 
 These open significant security loopholes, so shouldn't be used in a sensitive context or when you don't need browser support.
@@ -19,18 +21,22 @@ These open significant security loopholes, so shouldn't be used in a sensitive c
 You may need to trial and error to find additional things you need to allow.
 
 ## Quickstart
+
 #### Development environment
+
 ```bash
 direnv allow
 devenv shell
 ```
 
 #### Install
+
 ```bash
 pi install npm:pi-sandbox
 ```
 
 #### Configure
+
 Add a config like this either to `~/.pi/agent` (global) or to `.pi/sandbox.json` (local).
 Local config takes precedence over global.
 
@@ -39,10 +45,10 @@ Note below that the order of precedence for filesystem read and write are opposi
 ```json
 {
   "enabled": true,
-  "allowBrowserProcess": true,     // If you want to use agent-browser or similar Chrome setup
+  "allowBrowserProcess": true, // If you want to use agent-browser or similar Chrome setup
   "network": {
-    "allowLocalBinding": true,     // ditto
-    "allowAllUnixSockets": true,   // ditto
+    "allowLocalBinding": true, // ditto
+    "allowAllUnixSockets": true, // ditto
     "allowedDomains": ["github.com", "*.github.com"],
     "deniedDomains": []
   },
@@ -72,7 +78,7 @@ pi --no-sandbox          disable sandboxing for the session
 
 ### Config validation and error behavior
 
-The extension validates the structure of every config file it reads.  If a
+The extension validates the structure of every config file it reads. If a
 file cannot be parsed as JSON or contains a field with the wrong type (e.g.
 `"enabled": "yes"` instead of `true`, or `"allowedDomains"` containing a
 non-string entry), the extension:
@@ -110,13 +116,13 @@ extension reloads or pi restarts.
 
 ### What is prompted vs. hard-blocked
 
-| Rule | Behaviour |
-|------|-----------|
-| Domain not in `allowedDomains` | Prompted (bash and `!cmd`) |
-| Path not in `allowRead` | Prompted (read tool); granting adds to `allowRead` |
-| Path not in `allowWrite` | Prompted (write/edit tools and bash write failures) |
-| Path in `denyWrite` | Hard-blocked, no prompt |
-| Domain in `deniedDomains` | Hard-blocked at OS level, no prompt |
+| Rule                           | Behaviour                                           |
+| ------------------------------ | --------------------------------------------------- |
+| Domain not in `allowedDomains` | Prompted (bash and `!cmd`)                          |
+| Path not in `allowRead`        | Prompted (read tool); granting adds to `allowRead`  |
+| Path not in `allowWrite`       | Prompted (write/edit tools and bash write failures) |
+| Path in `denyWrite`            | Hard-blocked, no prompt                             |
+| Domain in `deniedDomains`      | Hard-blocked at OS level, no prompt                 |
 
 If a path is added to `allowWrite` via a prompt but is also present in
 `denyWrite`, it remains blocked. A warning is shown explaining which config
@@ -139,6 +145,7 @@ If neither file exists, built-in defaults apply (see above for the defaults).
 The footer shows a lock indicator while the sandbox is active.
 
 ## Ackowledgements
+
 Based on code from
 [badlogic/pi-mono](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/examples/extensions/sandbox/index.ts)
 by Mario Zechner, used under the

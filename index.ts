@@ -87,7 +87,10 @@ interface SandboxConfig extends SandboxRuntimeConfig {
  * any field has the wrong type.  Called after JSON.parse so that structural
  * issues surface immediately instead of being silently ignored.
  */
-function validateConfig(raw: unknown, filePath: string): Partial<SandboxConfig> {
+function validateConfig(
+  raw: unknown,
+  filePath: string,
+): Partial<SandboxConfig> {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     throw new Error(
       `Invalid sandbox config in "${filePath}": expected a JSON object at the top level.`,
