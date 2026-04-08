@@ -19,6 +19,12 @@ These open significant security loopholes, so shouldn't be used in a sensitive c
 You may need to trial and error to find additional things you need to allow.
 
 ## Quickstart
+#### Development environment
+```bash
+direnv allow
+devenv shell
+```
+
 #### Install
 ```bash
 pi install npm:pi-sandbox
@@ -120,3 +126,18 @@ Based on code from
 [badlogic/pi-mono](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/examples/extensions/sandbox/index.ts)
 by Mario Zechner, used under the
 [MIT License](https://github.com/badlogic/pi-mono/blob/main/LICENSE).
+
+## Development
+
+- `devenv.nix` defines the project development environment
+- `devenv.yaml` pins devenv inputs
+- `devenv.lock` is generated via `devenv update`
+- `.envrc` wires direnv to devenv
+
+Run `pnpm install` once after entering the shell, then validate with:
+
+```bash
+pnpm run ci:fmt
+pnpm run ci:lint
+pnpm run ci:check
+```
