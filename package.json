@@ -31,11 +31,11 @@
     "lint": "oxlint index.ts",
     "check": "tsc --noEmit",
     "ci:fmt": "oxfmt --check index.ts",
-    "ci:lint": "npm run lint",
-    "ci:check": "npm run check"
+    "ci:lint": "pnpm run lint",
+    "ci:check": "pnpm run check"
   },
   "dependencies": {
-    "@carderne/sandbox-runtime": "^0.0.43"
+    "@anthropic-ai/sandbox-runtime": "^0.0.49"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "^0.61.0"
