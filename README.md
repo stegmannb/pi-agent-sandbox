@@ -70,6 +70,23 @@ pi --no-sandbox          disable sandboxing for the session
 /sandbox                 show current configuration and session allowances
 ```
 
+### Config validation and error behavior
+
+The extension validates the structure of every config file it reads.  If a
+file cannot be parsed as JSON or contains a field with the wrong type (e.g.
+`"enabled": "yes"` instead of `true`, or `"allowedDomains"` containing a
+non-string entry), the extension:
+
+1. Shows an `error` notification immediately — **sandbox stays disabled** for
+   the session instead of silently falling back to defaults.
+2. Names the exact file and field that is invalid in the error message.
+
+This prevents a misconfigured file from creating a false sense of security
+(user believes the sandbox is active when it is not).
+
+To fix a broken config, edit the file at the path shown in the error message
+and restart the session (or run `/sandbox-enable` once the file is valid).
+
 ## What it does
 
 **Bash commands** are wrapped with `sandbox-exec` (macOS) or `bubblewrap`
