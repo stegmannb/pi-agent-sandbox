@@ -482,11 +482,12 @@ export default function (pi: ExtensionAPI) {
   let sandboxEnabled = false;
   let sandboxInitialized = false;
 
-  // Session-temporary allowances — held in JS memory, not accessible by the agent.
+  // Session-temporary allowances and denials — held in JS memory, not accessible by the agent.
   // These are added on top of whatever is in the config files.
   const sessionAllowedDomains: string[] = [];
   const sessionAllowedReadPaths: string[] = [];
   const sessionAllowedWritePaths: string[] = [];
+  const sessionDeniedWritePaths: string[] = [];
 
   // ── Effective config helpers ────────────────────────────────────────────────
 
@@ -511,6 +512,14 @@ export default function (pi: ExtensionAPI) {
     return [
       ...(config.filesystem?.allowWrite ?? []),
       ...sessionAllowedWritePaths,
+    ];
+  }
+
+  function getEffectiveDenyWrite(cwd: string): string[] {
+    const config = loadConfig(cwd);
+    return [
+      ...(config.filesystem?.denyWrite ?? []),
+      ...sessionDeniedWritePaths,
     ];
   }
 
@@ -543,7 +552,10 @@ export default function (pi: ExtensionAPI) {
             ...(config.filesystem?.allowWrite ?? []),
             ...sessionAllowedWritePaths,
           ],
-          denyWrite: config.filesystem?.denyWrite ?? [],
+          denyWrite: [
+            ...(config.filesystem?.denyWrite ?? []),
+            ...sessionDeniedWritePaths,
+          ],
         },
         enableWeakerNetworkIsolation: true,
       });
@@ -807,7 +819,7 @@ export default function (pi: ExtensionAPI) {
     ) {
       const path = (event.input as { path: string }).path;
       const allowWrite = getEffectiveAllowWrite(ctx.cwd);
-      const denyWrite = config.filesystem?.denyWrite ?? [];
+      const denyWrite = getEffectiveDenyWrite(ctx.cwd);
 
       if (allowWrite.length > 0 && !matchesPattern(path, allowWrite)) {
         const choice = await promptWriteBlock(ctx, path);
@@ -845,6 +857,50 @@ export default function (pi: ExtensionAPI) {
         };
       }
     }
+  });
+
+  // ── sandbox:* event listeners ────────────────────────────────────────────────
+  // Allow other extensions (e.g. pi-task-flow) to adjust sandbox rules at runtime
+  // via the shared pi.events bus without touching config files.
+
+  pi.events.on("sandbox:allow-write", (data) => {
+    const { path } = data as { path: string };
+    if (!sessionAllowedWritePaths.includes(path)) {
+      sessionAllowedWritePaths.push(path);
+    }
+    reinitializeSandbox(localCwd).catch((e) =>
+      console.error(`sandbox:allow-write reinitialize failed: ${e}`),
+    );
+  });
+
+  pi.events.on("sandbox:deny-write", (data) => {
+    const { path } = data as { path: string };
+    if (!sessionDeniedWritePaths.includes(path)) {
+      sessionDeniedWritePaths.push(path);
+    }
+    reinitializeSandbox(localCwd).catch((e) =>
+      console.error(`sandbox:deny-write reinitialize failed: ${e}`),
+    );
+  });
+
+  pi.events.on("sandbox:allow-read", (data) => {
+    const { path } = data as { path: string };
+    if (!sessionAllowedReadPaths.includes(path)) {
+      sessionAllowedReadPaths.push(path);
+    }
+    reinitializeSandbox(localCwd).catch((e) =>
+      console.error(`sandbox:allow-read reinitialize failed: ${e}`),
+    );
+  });
+
+  pi.events.on("sandbox:reset-session", () => {
+    sessionAllowedDomains.length = 0;
+    sessionAllowedReadPaths.length = 0;
+    sessionAllowedWritePaths.length = 0;
+    sessionDeniedWritePaths.length = 0;
+    reinitializeSandbox(localCwd).catch((e) =>
+      console.error(`sandbox:reset-session reinitialize failed: ${e}`),
+    );
   });
 
   // ── session_start ───────────────────────────────────────────────────────────
