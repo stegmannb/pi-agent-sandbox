@@ -483,6 +483,7 @@ export default function (pi: ExtensionAPI) {
 
   let sandboxEnabled = false;
   let sandboxInitialized = false;
+  let userDisabled = false; // set by /sandbox-disable; prevents session_start from re-enabling
 
   // Session-temporary allowances and denials — held in JS memory, not accessible by the agent.
   // These are added on top of whatever is in the config files.
@@ -916,6 +917,12 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
+    if (userDisabled) {
+      sandboxEnabled = false;
+      ctx.ui.notify("Sandbox disabled (user override active)", "info");
+      return;
+    }
+
     let config: SandboxConfig;
     try {
       config = loadConfig(ctx.cwd);
@@ -1045,6 +1052,7 @@ export default function (pi: ExtensionAPI) {
 
         sandboxEnabled = true;
         sandboxInitialized = true;
+        userDisabled = false;
 
         const networkCount = config.network?.allowedDomains?.length ?? 0;
         const writeCount = config.filesystem?.allowWrite?.length ?? 0;
@@ -1083,6 +1091,7 @@ export default function (pi: ExtensionAPI) {
 
       sandboxEnabled = false;
       sandboxInitialized = false;
+      userDisabled = true;
       ctx.ui.setStatus("sandbox", "");
       ctx.ui.notify("Sandbox disabled", "info");
     },
