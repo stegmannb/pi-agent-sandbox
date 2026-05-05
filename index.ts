@@ -61,7 +61,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
@@ -342,6 +342,27 @@ function writeConfigFile(configPath: string, config: Partial<SandboxConfig>): vo
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
 }
 
+/**
+ * Returns true if `filePath` is writable by the current process.
+ * If the file does not yet exist, checks whether its parent directory is writable.
+ * Used to detect read-only configs (e.g. Nix-store symlinks) and hide the
+ * "Allow for all projects" option when it would always fail.
+ */
+function isConfigWritable(filePath: string): boolean {
+  try {
+    accessSync(filePath, constants.W_OK);
+    return true;
+  } catch {
+    // File doesn't exist yet — check whether the parent dir is writable
+    try {
+      accessSync(dirname(filePath), constants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 function addDomainToConfig(configPath: string, domain: string): void {
   const config = readOrEmptyConfig(configPath);
   const existing = config.network?.allowedDomains ?? [];
@@ -537,11 +558,13 @@ export default function (pi: ExtensionAPI) {
     domain: string,
   ): Promise<"abort" | "session" | "project" | "global"> {
     if (!ctx.hasUI) return "abort";
+    const { globalPath } = getConfigPaths(ctx.cwd);
+    const globalWritable = isConfigWritable(globalPath);
     const choice = await ctx.ui.select(`🌐 Network blocked: "${domain}" is not in allowedDomains`, [
       "Abort (keep blocked)",
       "Allow for this session only",
       "Allow for this project  →  .pi/sandbox.json",
-      "Allow for all projects  →  ~/.pi/agent/sandbox.json",
+      ...(globalWritable ? ["Allow for all projects  →  global sandbox.json"] : []),
     ]);
     if (!choice || choice.startsWith("Abort")) return "abort";
     if (choice.startsWith("Allow for this session")) return "session";
@@ -554,11 +577,13 @@ export default function (pi: ExtensionAPI) {
     filePath: string,
   ): Promise<"abort" | "session" | "project" | "global"> {
     if (!ctx.hasUI) return "abort";
+    const { globalPath } = getConfigPaths(ctx.cwd);
+    const globalWritable = isConfigWritable(globalPath);
     const choice = await ctx.ui.select(`📖 Read blocked: "${filePath}" is not in allowRead`, [
       "Abort (keep blocked)",
       "Allow for this session only",
       "Allow for this project  →  .pi/sandbox.json",
-      "Allow for all projects  →  ~/.pi/agent/sandbox.json",
+      ...(globalWritable ? ["Allow for all projects  →  global sandbox.json"] : []),
     ]);
     if (!choice || choice.startsWith("Abort")) return "abort";
     if (choice.startsWith("Allow for this session")) return "session";
@@ -571,11 +596,13 @@ export default function (pi: ExtensionAPI) {
     filePath: string,
   ): Promise<"abort" | "session" | "project" | "global"> {
     if (!ctx.hasUI) return "abort";
+    const { globalPath } = getConfigPaths(ctx.cwd);
+    const globalWritable = isConfigWritable(globalPath);
     const choice = await ctx.ui.select(`📝 Write blocked: "${filePath}" is not in allowWrite`, [
       "Abort (keep blocked)",
       "Allow for this session only",
       "Allow for this project  →  .pi/sandbox.json",
-      "Allow for all projects  →  ~/.pi/agent/sandbox.json",
+      ...(globalWritable ? ["Allow for all projects  →  global sandbox.json"] : []),
     ]);
     if (!choice || choice.startsWith("Abort")) return "abort";
     if (choice.startsWith("Allow for this session")) return "session";
