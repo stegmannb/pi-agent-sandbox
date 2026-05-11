@@ -26,7 +26,7 @@ You may need to trial and error to find additional things you need to allow.
 
 ```bash
 direnv allow
-nix develop
+devenv shell
 ```
 
 Build the Nix package with:
@@ -159,11 +159,12 @@ by Mario Zechner, used under the
 
 ## Development
 
-- `flake.nix` exposes the extension as `packages.<system>.default` and `devShells.<system>.default`
-- `flake.lock` pins nixpkgs, systems, and `devenv` v2.1 for reproducible shells
+- `flake.nix` exposes the extension as `packages.<system>.default`
 - `nix/package.nix` contains the runtime packaging logic used by the flake
-- `devenv.nix` defines the devenv module used by the dev shell
-- `.envrc` loads the flake through pinned `nix-direnv`
+- `devenv.nix` defines the project development environment
+- `devenv.yaml` pins devenv inputs
+- `devenv.lock` is generated via `devenv update`
+- `.envrc` wires direnv to devenv
 
 Run `pnpm install` once after entering the shell, then validate with:
 
