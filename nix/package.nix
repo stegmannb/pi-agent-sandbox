@@ -43,7 +43,7 @@ stdenv.mkDerivation (finalAttrs: {
   '';
 
   postInstall = ''
-    UTILS=$(find "$out/pi-sandbox/node_modules/.pnpm" \
+    UTILS=$(find "$out/sandbox/node_modules/.pnpm" \
       -path "*/sandbox-runtime*/dist/sandbox/macos-sandbox-utils.js" \
       | head -1)
     if [ -z "$UTILS" ]; then
@@ -52,7 +52,7 @@ stdenv.mkDerivation (finalAttrs: {
     fi
 
     node ${../nix/patches/pi-agent-sandbox-metal-iokit.mjs} "$UTILS"
-    node ${../nix/patches/pi-agent-sandbox-allow-browser-process.mjs} "$out/pi-sandbox/index.ts"
+    node ${../nix/patches/pi-agent-sandbox-allow-browser-process.mjs} "$out/sandbox/index.ts"
   '';
 
   meta = {
