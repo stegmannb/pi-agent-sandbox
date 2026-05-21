@@ -36,8 +36,8 @@ stdenv.mkDerivation (finalAttrs: {
   installPhase = ''
     runHook preInstall
 
-    mkdir -p "$out/pi-sandbox"
-    cp -r . "$out/pi-sandbox/"
+    mkdir -p "$out/sandbox"
+    cp -r . "$out/sandbox/"
 
     runHook postInstall
   '';
