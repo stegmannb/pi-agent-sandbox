@@ -799,7 +799,7 @@ export default function (pi: ExtensionAPI) {
       const writeCount = config.filesystem?.allowWrite?.length ?? 0;
       ctx.ui.setStatus(
         "sandbox",
-        ctx.ui.theme.fg("accent", `🔒 Sandbox: filesystem only, ${writeCount} write paths`),
+        ctx.ui.theme.fg("accent", `🔒 Sandbox: ${writeCount} write paths`),
       );
     } catch (err) {
       sandboxEnabled = false;
@@ -872,7 +872,7 @@ export default function (pi: ExtensionAPI) {
           "sandbox",
           ctx.ui.theme.fg(
             "accent",
-            `🔒 Sandbox: filesystem only, ${writeCount} write paths`,
+            `🔒 Sandbox: ${writeCount} write paths`,
           ),
         );
         ctx.ui.notify("Sandbox enabled", "info");
