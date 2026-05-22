@@ -36,14 +36,14 @@ stdenv.mkDerivation (finalAttrs: {
   installPhase = ''
     runHook preInstall
 
-    mkdir -p "$out"
-    cp -r . "$out/"
+    mkdir -p "$out/sandbox"
+    cp -r . "$out/sandbox/"
 
     runHook postInstall
   '';
 
   postInstall = ''
-    UTILS=$(find "$out/node_modules/.pnpm" \
+    UTILS=$(find "$out/sandbox/node_modules/.pnpm" \
       -path "*/sandbox-runtime*/dist/sandbox/macos-sandbox-utils.js" \
       | head -1)
     if [ -z "$UTILS" ]; then
@@ -52,7 +52,7 @@ stdenv.mkDerivation (finalAttrs: {
     fi
 
     node ${../nix/patches/pi-agent-sandbox-metal-iokit.mjs} "$UTILS"
-    node ${../nix/patches/pi-agent-sandbox-allow-browser-process.mjs} "$out/index.ts"
+    node ${../nix/patches/pi-agent-sandbox-allow-browser-process.mjs} "$out/sandbox/index.ts"
   '';
 
   meta = {
