@@ -5,12 +5,16 @@
  * Sandbox Extension - OS-level sandboxing for bash commands, plus path policy
  * enforcement for pi's read/write/edit tools, with interactive permission prompts.
  *
- * Uses @anthropic-ai/sandbox-runtime to enforce filesystem and network
- * restrictions on bash commands at the OS level (sandbox-exec on macOS,
- * bubblewrap on Linux). Also intercepts the read, write, and edit tools to
- * apply the same denyRead/denyWrite/allowWrite filesystem rules, which OS-level
- * sandboxing cannot cover (those tools run directly in Node.js, not in a
- * subprocess).
+ * Uses @anthropic-ai/sandbox-runtime to enforce filesystem restrictions on
+ * bash commands at the OS level (sandbox-exec on macOS, bubblewrap on Linux).
+ * Also intercepts the read, write, and edit tools to apply the same
+ * denyRead/denyWrite/allowWrite filesystem rules, which OS-level sandboxing
+ * cannot cover (those tools run directly in Node.js, not in a subprocess).
+ *
+ * Network isolation is intentionally disabled — the sandbox-runtime proxy
+ * architecture only supports an allow-list model. When upstream adds
+ * "allow-all + deny-list" support (tracked in sandbox-runtime#253) this
+ * can be revisited.
  *
  * When a block is triggered, the user is prompted to:
  *   (a) Abort (keep blocked)
@@ -19,7 +23,6 @@
  *   (d) Allow for all projects       — written to ~/.pi/agent/sandbox.json
  *
  * What gets prompted vs. hard-blocked:
- *   - domains: prompted if not whitelisted nor explicitly denied
  *   - write: prompted if not whitelisted nor explicitly denied
  *   - read: always prompted (because denyRead is used for broad block, may want to punch holes)
  *
@@ -35,10 +38,6 @@
  * ```json
  * {
  *   "enabled": true,
- *   "network": {
- *     "allowedDomains": ["github.com", "*.github.com"],
- *     "deniedDomains": []
- *   },
  *   "filesystem": {
  *     "denyRead": ["/Users", "/home"],
  *     "allowRead": [".", "~/.config", "~/.local", "Library"],
@@ -96,30 +95,6 @@ function validateConfig(raw: unknown, filePath: string): Partial<SandboxConfig> 
     );
   }
 
-  if ("network" in obj) {
-    const net = obj["network"];
-    if (typeof net !== "object" || net === null || Array.isArray(net)) {
-      throw new Error(`Invalid sandbox config in "${filePath}": "network" must be an object.`);
-    }
-    const netObj = net as Record<string, unknown>;
-    for (const key of ["allowedDomains", "deniedDomains"] as const) {
-      if (key in netObj && !Array.isArray(netObj[key])) {
-        throw new Error(
-          `Invalid sandbox config in "${filePath}": "network.${key}" must be an array.`,
-        );
-      }
-      if (Array.isArray(netObj[key])) {
-        for (const entry of netObj[key] as unknown[]) {
-          if (typeof entry !== "string") {
-            throw new Error(
-              `Invalid sandbox config in "${filePath}": every entry in "network.${key}" must be a string, got ${JSON.stringify(entry)}.`,
-            );
-          }
-        }
-      }
-    }
-  }
-
   if ("filesystem" in obj) {
     const fs = obj["filesystem"];
     if (typeof fs !== "object" || fs === null || Array.isArray(fs)) {
@@ -149,25 +124,13 @@ function validateConfig(raw: unknown, filePath: string): Partial<SandboxConfig> 
 
 const DEFAULT_CONFIG: SandboxConfig = {
   enabled: true,
+  // allowedDomains/deniedDomains intentionally omitted: runtime proxy not
+  // injected → unrestricted network. Unix socket and local-binding rules
+  // are still enforced via the OS profile.
   network: {
-    allowedDomains: [
-      "npmjs.org",
-      "*.npmjs.org",
-      "registry.npmjs.org",
-      "registry.yarnpkg.com",
-      "pypi.org",
-      "*.pypi.org",
-      "github.com",
-      "*.github.com",
-      "api.github.com",
-      "raw.githubusercontent.com",
-    ],
-    deniedDomains: [],
-    // Allow Unix sockets (needed for SSH ControlMaster, etc.) and local
-    // port binding by default so tools like git-over-SSH work out of the box.
     allowAllUnixSockets: true,
     allowLocalBinding: true,
-  },
+  } as any,
   filesystem: {
     denyRead: ["/Users", "/home"],
     allowRead: [".", "~/.config", "~/.local", "Library"],
@@ -205,15 +168,7 @@ function deepMerge(base: SandboxConfig, overrides: Partial<SandboxConfig>): Sand
   if (overrides.enabled !== undefined) result.enabled = overrides.enabled;
   if (overrides.network) {
     result.network = {
-      // Merge array fields by concatenation
-      allowedDomains: [
-        ...(base.network?.allowedDomains ?? []),
-        ...(overrides.network.allowedDomains ?? []),
-      ],
-      deniedDomains: [
-        ...(base.network?.deniedDomains ?? []),
-        ...(overrides.network.deniedDomains ?? []),
-      ],
+      // allowedDomains/deniedDomains intentionally omitted → unrestricted network
       // Scalar/optional fields: override takes precedence, fall back to base
       allowAllUnixSockets:
         overrides.network.allowAllUnixSockets ?? base.network?.allowAllUnixSockets,
@@ -230,7 +185,7 @@ function deepMerge(base: SandboxConfig, overrides: Partial<SandboxConfig>): Sand
       socksProxyPort: overrides.network.socksProxyPort ?? base.network?.socksProxyPort,
       mitmProxy: overrides.network.mitmProxy ?? base.network?.mitmProxy,
       parentProxy: overrides.network.parentProxy ?? base.network?.parentProxy,
-    };
+    } as any;
   }
   if (overrides.filesystem) {
     result.filesystem = {
@@ -268,30 +223,6 @@ function deepMerge(base: SandboxConfig, overrides: Partial<SandboxConfig>): Sand
   }
 
   return result;
-}
-
-// ── Domain helpers ────────────────────────────────────────────────────────────
-
-function extractDomainsFromCommand(command: string): string[] {
-  const urlRegex = /https?:\/\/([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
-  const domains = new Set<string>();
-  let match;
-  while ((match = urlRegex.exec(command)) !== null) {
-    domains.add(match[1]);
-  }
-  return [...domains];
-}
-
-function domainMatchesPattern(domain: string, pattern: string): boolean {
-  if (pattern.startsWith("*.")) {
-    const base = pattern.slice(2);
-    return domain === base || domain.endsWith("." + base);
-  }
-  return domain === pattern;
-}
-
-function domainIsAllowed(domain: string, allowedDomains: string[]): boolean {
-  return allowedDomains.some((p) => domainMatchesPattern(domain, p));
 }
 
 // ── Output analysis ───────────────────────────────────────────────────────────
@@ -367,19 +298,6 @@ function isConfigWritable(filePath: string): boolean {
     return true;
   } catch {
     return false;
-  }
-}
-
-function addDomainToConfig(configPath: string, domain: string): void {
-  const config = readOrEmptyConfig(configPath);
-  const existing = config.network?.allowedDomains ?? [];
-  if (!existing.includes(domain)) {
-    config.network = {
-      ...config.network,
-      allowedDomains: [...existing, domain],
-      deniedDomains: config.network?.deniedDomains ?? [],
-    };
-    writeConfigFile(configPath, config);
   }
 }
 
@@ -500,19 +418,13 @@ export default function (pi: ExtensionAPI) {
   let sandboxInitialized = false;
   let userDisabled = false; // set by /sandbox-disable; prevents session_start from re-enabling
 
-  // Session-temporary allowances and denials — held in JS memory, not accessible by the agent.
+  // Session-temporary allowances — held in JS memory, not accessible by the agent.
   // These are added on top of whatever is in the config files.
-  const sessionAllowedDomains: string[] = [];
   const sessionAllowedReadPaths: string[] = [];
   const sessionAllowedWritePaths: string[] = [];
   const sessionDeniedWritePaths: string[] = [];
 
   // ── Effective config helpers ────────────────────────────────────────────────
-
-  function getEffectiveAllowedDomains(cwd: string): string[] {
-    const config = loadConfig(cwd);
-    return [...(config.network?.allowedDomains ?? []), ...sessionAllowedDomains];
-  }
 
   function getEffectiveAllowRead(cwd: string): string[] {
     const config = loadConfig(cwd);
@@ -539,11 +451,8 @@ export default function (pi: ExtensionAPI) {
     try {
       await SandboxManager.reset();
       await SandboxManager.initialize({
-        network: {
-          ...config.network,
-          allowedDomains: [...(config.network?.allowedDomains ?? []), ...sessionAllowedDomains],
-          deniedDomains: config.network?.deniedDomains ?? [],
-        },
+        // allowedDomains intentionally omitted → runtime proxy not injected → unrestricted network
+        network: config.network as any,
         filesystem: {
           ...config.filesystem,
           denyRead: config.filesystem?.denyRead ?? [],
@@ -551,7 +460,6 @@ export default function (pi: ExtensionAPI) {
           allowWrite: [...(config.filesystem?.allowWrite ?? []), ...sessionAllowedWritePaths],
           denyWrite: [...(config.filesystem?.denyWrite ?? []), ...sessionDeniedWritePaths],
         },
-        enableWeakerNetworkIsolation: true,
       });
     } catch (e) {
       console.error(`Warning: Failed to reinitialize sandbox: ${e}`);
@@ -559,25 +467,6 @@ export default function (pi: ExtensionAPI) {
   }
 
   // ── UI prompts ──────────────────────────────────────────────────────────────
-
-  async function promptDomainBlock(
-    ctx: ExtensionContext,
-    domain: string,
-  ): Promise<"abort" | "session" | "project" | "global"> {
-    if (!ctx.hasUI) return "abort";
-    const { globalPath } = getConfigPaths(ctx.cwd);
-    const globalWritable = isConfigWritable(globalPath);
-    const choice = await ctx.ui.select(`🌐 Network blocked: "${domain}" is not in allowedDomains`, [
-      "Abort (keep blocked)",
-      "Allow for this session only",
-      "Allow for this project  →  .pi/sandbox.json",
-      ...(globalWritable ? ["Allow for all projects  →  global sandbox.json"] : []),
-    ]);
-    if (!choice || choice.startsWith("Abort")) return "abort";
-    if (choice.startsWith("Allow for this session")) return "session";
-    if (choice.startsWith("Allow for this project")) return "project";
-    return "global";
-  }
 
   async function promptReadBlock(
     ctx: ExtensionContext,
@@ -618,18 +507,6 @@ export default function (pi: ExtensionAPI) {
   }
 
   // ── Apply allowance choices ─────────────────────────────────────────────────
-
-  async function applyDomainChoice(
-    choice: "session" | "project" | "global",
-    domain: string,
-    cwd: string,
-  ): Promise<void> {
-    const { globalPath, projectPath } = getConfigPaths(cwd);
-    if (!sessionAllowedDomains.includes(domain)) sessionAllowedDomains.push(domain);
-    if (choice === "project") addDomainToConfig(projectPath, domain);
-    if (choice === "global") addDomainToConfig(globalPath, domain);
-    await reinitializeSandbox(cwd);
-  }
 
   async function applyReadChoice(
     choice: "session" | "project" | "global",
@@ -716,31 +593,10 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ── user_bash — network pre-check ──────────────────────────────────────────
+  // ── user_bash ──────────────────────────────────────────────────────────────
 
-  pi.on("user_bash", async (event, ctx) => {
+  pi.on("user_bash", async (_event, _ctx) => {
     if (!sandboxEnabled || !sandboxInitialized) return;
-
-    const domains = extractDomainsFromCommand(event.command);
-    const effectiveDomains = getEffectiveAllowedDomains(ctx.cwd);
-
-    for (const domain of domains) {
-      if (!domainIsAllowed(domain, effectiveDomains)) {
-        const choice = await promptDomainBlock(ctx, domain);
-        if (choice === "abort") {
-          return {
-            result: {
-              output: `Blocked: "${domain}" is not in allowedDomains. Use /sandbox to review your config.`,
-              exitCode: 1,
-              cancelled: false,
-              truncated: false,
-            },
-          };
-        }
-        await applyDomainChoice(choice, domain, ctx.cwd);
-      }
-    }
-
     return { operations: createSandboxedBashOps() };
   });
 
@@ -751,24 +607,6 @@ export default function (pi: ExtensionAPI) {
     if (!config.enabled || !sandboxEnabled) return;
 
     const { projectPath, globalPath } = getConfigPaths(ctx.cwd);
-
-    // Network pre-check for bash tool calls.
-    if (sandboxEnabled && sandboxInitialized && isToolCallEventType("bash", event)) {
-      const domains = extractDomainsFromCommand(event.input.command);
-      const effectiveDomains = getEffectiveAllowedDomains(ctx.cwd);
-      for (const domain of domains) {
-        if (!domainIsAllowed(domain, effectiveDomains)) {
-          const choice = await promptDomainBlock(ctx, domain);
-          if (choice === "abort") {
-            return {
-              block: true,
-              reason: `Network access to "${domain}" is blocked (not in allowedDomains).`,
-            };
-          }
-          await applyDomainChoice(choice, domain, ctx.cwd);
-        }
-      }
-    }
 
     // Path policy: read tool.
     //   - If the path is already in effectiveAllowRead, allow silently.
@@ -873,7 +711,6 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.events.on("sandbox:reset-session", () => {
-    sessionAllowedDomains.length = 0;
     sessionAllowedReadPaths.length = 0;
     sessionAllowedWritePaths.length = 0;
     sessionDeniedWritePaths.length = 0;
@@ -935,12 +772,13 @@ export default function (pi: ExtensionAPI) {
         enableWeakerNestedSandbox?: boolean;
       };
 
+      // allowedDomains intentionally omitted from network config → runtime proxy
+      // not injected → unrestricted network. Filesystem isolation still applies.
       await SandboxManager.initialize({
-        network: config.network,
+        network: config.network as any,
         filesystem: config.filesystem,
         ignoreViolations: configExt.ignoreViolations,
         enableWeakerNestedSandbox: configExt.enableWeakerNestedSandbox,
-        enableWeakerNetworkIsolation: true,
       });
 
       // Make Node's built-in fetch() honour HTTP_PROXY / HTTPS_PROXY in this
@@ -958,11 +796,10 @@ export default function (pi: ExtensionAPI) {
       sandboxEnabled = true;
       sandboxInitialized = true;
 
-      const networkCount = config.network?.allowedDomains?.length ?? 0;
       const writeCount = config.filesystem?.allowWrite?.length ?? 0;
       ctx.ui.setStatus(
         "sandbox",
-        ctx.ui.theme.fg("accent", `🔒 Sandbox: ${networkCount} domains, ${writeCount} write paths`),
+        ctx.ui.theme.fg("accent", `🔒 Sandbox: filesystem only, ${writeCount} write paths`),
       );
     } catch (err) {
       sandboxEnabled = false;
@@ -1020,24 +857,22 @@ export default function (pi: ExtensionAPI) {
         };
 
         await SandboxManager.initialize({
-          network: config.network,
+          network: config.network as any,
           filesystem: config.filesystem,
           ignoreViolations: configExt.ignoreViolations,
           enableWeakerNestedSandbox: configExt.enableWeakerNestedSandbox,
-          enableWeakerNetworkIsolation: true,
         });
 
         sandboxEnabled = true;
         sandboxInitialized = true;
         userDisabled = false;
 
-        const networkCount = config.network?.allowedDomains?.length ?? 0;
         const writeCount = config.filesystem?.allowWrite?.length ?? 0;
         ctx.ui.setStatus(
           "sandbox",
           ctx.ui.theme.fg(
             "accent",
-            `🔒 Sandbox: ${networkCount} domains, ${writeCount} write paths`,
+            `🔒 Sandbox: filesystem only, ${writeCount} write paths`,
           ),
         );
         ctx.ui.notify("Sandbox enabled", "info");
@@ -1090,12 +925,7 @@ export default function (pi: ExtensionAPI) {
         `  Project config: ${projectPath}`,
         `  Global config:  ${globalPath}`,
         "",
-        "Network (bash + !cmd):",
-        `  Allowed domains: ${config.network?.allowedDomains?.join(", ") || "(none)"}`,
-        `  Denied domains:  ${config.network?.deniedDomains?.join(", ") || "(none)"}`,
-        ...(sessionAllowedDomains.length > 0
-          ? [`  Session allowed: ${sessionAllowedDomains.join(", ")}`]
-          : []),
+        "Network: unrestricted (domain filtering disabled; see sandbox-runtime#253)",
         "",
         "Filesystem (bash + read/write/edit tools):",
         `  Deny Read:   ${config.filesystem?.denyRead?.join(", ") || "(none)"}`,

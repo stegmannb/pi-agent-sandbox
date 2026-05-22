@@ -35,7 +35,7 @@
     "ci:check": "pnpm run check"
   },
   "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "^0.0.49"
+    "@anthropic-ai/sandbox-runtime": "^0.0.52"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "^0.61.0"
