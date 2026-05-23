@@ -79,6 +79,7 @@ Note below that the order of precedence for filesystem read and write are opposi
 
 ```
 pi --no-sandbox          disable sandboxing for the session
+/sandbox-toggle          toggle sandbox on/off for the session
 /sandbox                 show current configuration and session allowances
 ```
 
@@ -97,7 +98,7 @@ This prevents a misconfigured file from creating a false sense of security
 (user believes the sandbox is active when it is not).
 
 To fix a broken config, edit the file at the path shown in the error message
-and restart the session (or run `/sandbox-enable` once the file is valid).
+and restart the session (or run `/sandbox-toggle` once the file is valid).
 
 ## What it does
 

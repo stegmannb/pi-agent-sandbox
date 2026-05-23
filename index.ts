@@ -416,7 +416,7 @@ export default function (pi: ExtensionAPI) {
 
   let sandboxEnabled = false;
   let sandboxInitialized = false;
-  let userDisabled = false; // set by /sandbox-disable; prevents session_start from re-enabling
+  let userDisabled = false; // set by /sandbox-toggle; prevents session_start from re-enabling
 
   // Session-temporary allowances — held in JS memory, not accessible by the agent.
   // These are added on top of whatever is in the config files.
@@ -825,11 +825,22 @@ export default function (pi: ExtensionAPI) {
 
   // ── /sandbox command ────────────────────────────────────────────────────────
 
-  pi.registerCommand("sandbox-enable", {
-    description: "Enable the sandbox for this session",
+  pi.registerCommand("sandbox-toggle", {
+    description: "Toggle sandbox on/off for this session",
     handler: async (_args, ctx) => {
       if (sandboxEnabled) {
-        ctx.ui.notify("Sandbox is already enabled", "info");
+        if (sandboxInitialized) {
+          try {
+            await SandboxManager.reset();
+          } catch {
+            // Ignore cleanup errors
+          }
+        }
+        sandboxEnabled = false;
+        sandboxInitialized = false;
+        userDisabled = true;
+        ctx.ui.setStatus("sandbox", "🔒 Sandbox: off");
+        ctx.ui.notify("Sandbox disabled", "warning");
         return;
       }
 
@@ -882,30 +893,6 @@ export default function (pi: ExtensionAPI) {
           "error",
         );
       }
-    },
-  });
-
-  pi.registerCommand("sandbox-disable", {
-    description: "Disable the sandbox for this session",
-    handler: async (_args, ctx) => {
-      if (!sandboxEnabled) {
-        ctx.ui.notify("Sandbox is already disabled", "info");
-        return;
-      }
-
-      if (sandboxInitialized) {
-        try {
-          await SandboxManager.reset();
-        } catch {
-          // Ignore cleanup errors
-        }
-      }
-
-      sandboxEnabled = false;
-      sandboxInitialized = false;
-      userDisabled = true;
-      ctx.ui.setStatus("sandbox", "🔒 Sandbox: off");
-      ctx.ui.notify("Sandbox disabled", "warning");
     },
   });
 
