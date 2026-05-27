@@ -726,14 +726,14 @@ export default function (pi: ExtensionAPI) {
 
     if (noSandbox) {
       sandboxEnabled = false;
-      ctx.ui.setStatus("sandbox", "🔒 Sandbox: off");
+      ctx.ui.setStatus("sandbox", "🔓 Sandbox: off");
       ctx.ui.notify("Sandbox disabled via --no-sandbox", "warning");
       return;
     }
 
     if (userDisabled) {
       sandboxEnabled = false;
-      ctx.ui.setStatus("sandbox", "🔒 Sandbox: off");
+      ctx.ui.setStatus("sandbox", "🔓 Sandbox: off");
       ctx.ui.notify("Sandbox disabled (user override active)", "warning");
       return;
     }
@@ -743,7 +743,7 @@ export default function (pi: ExtensionAPI) {
       config = loadConfig(ctx.cwd);
     } catch (err) {
       sandboxEnabled = false;
-      ctx.ui.setStatus("sandbox", "🔒 Sandbox: off");
+      ctx.ui.setStatus("sandbox", "🔓 Sandbox: off");
       ctx.ui.notify(
         `Sandbox config error — sandbox disabled: ${err instanceof Error ? err.message : err}`,
         "error",
@@ -753,7 +753,7 @@ export default function (pi: ExtensionAPI) {
 
     if (!config.enabled) {
       sandboxEnabled = false;
-      ctx.ui.setStatus("sandbox", "🔒 Sandbox: off");
+      ctx.ui.setStatus("sandbox", "🔓 Sandbox: off");
       ctx.ui.notify("Sandbox disabled via config", "warning");
       return;
     }
@@ -761,7 +761,7 @@ export default function (pi: ExtensionAPI) {
     const platform = process.platform;
     if (platform !== "darwin" && platform !== "linux") {
       sandboxEnabled = false;
-      ctx.ui.setStatus("sandbox", "🔒 Sandbox: off");
+      ctx.ui.setStatus("sandbox", "🔓 Sandbox: off");
       ctx.ui.notify(`Sandbox not supported on ${platform}`, "warning");
       return;
     }
@@ -803,7 +803,7 @@ export default function (pi: ExtensionAPI) {
       );
     } catch (err) {
       sandboxEnabled = false;
-      ctx.ui.setStatus("sandbox", "🔒 Sandbox: off");
+      ctx.ui.setStatus("sandbox", "🔓 Sandbox: off");
       ctx.ui.notify(
         `Sandbox initialization failed: ${err instanceof Error ? err.message : err}`,
         "error",
@@ -839,7 +839,7 @@ export default function (pi: ExtensionAPI) {
         sandboxEnabled = false;
         sandboxInitialized = false;
         userDisabled = true;
-        ctx.ui.setStatus("sandbox", "🔒 Sandbox: off");
+        ctx.ui.setStatus("sandbox", "🔓 Sandbox: off");
         ctx.ui.notify("Sandbox disabled", "warning");
         return;
       }
