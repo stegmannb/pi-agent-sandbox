@@ -204,11 +204,13 @@ function deepMerge(base: SandboxConfig, overrides: Partial<SandboxConfig>): Sand
   const extOverrides = overrides as {
     ignoreViolations?: Record<string, string[]>;
     enableWeakerNestedSandbox?: boolean;
+    enableWeakerNetworkIsolation?: boolean;
     allowBrowserProcess?: boolean;
   };
   const extResult = result as {
     ignoreViolations?: Record<string, string[]>;
     enableWeakerNestedSandbox?: boolean;
+    enableWeakerNetworkIsolation?: boolean;
     allowBrowserProcess?: boolean;
   };
 
@@ -217,6 +219,9 @@ function deepMerge(base: SandboxConfig, overrides: Partial<SandboxConfig>): Sand
   }
   if (extOverrides.enableWeakerNestedSandbox !== undefined) {
     extResult.enableWeakerNestedSandbox = extOverrides.enableWeakerNestedSandbox;
+  }
+  if (extOverrides.enableWeakerNetworkIsolation !== undefined) {
+    extResult.enableWeakerNetworkIsolation = extOverrides.enableWeakerNetworkIsolation;
   }
   if (extOverrides.allowBrowserProcess !== undefined) {
     extResult.allowBrowserProcess = extOverrides.allowBrowserProcess;
@@ -770,6 +775,7 @@ export default function (pi: ExtensionAPI) {
       const configExt = config as unknown as {
         ignoreViolations?: Record<string, string[]>;
         enableWeakerNestedSandbox?: boolean;
+        enableWeakerNetworkIsolation?: boolean;
       };
 
       // allowedDomains intentionally omitted from network config → runtime proxy
@@ -779,6 +785,7 @@ export default function (pi: ExtensionAPI) {
         filesystem: config.filesystem,
         ignoreViolations: configExt.ignoreViolations,
         enableWeakerNestedSandbox: configExt.enableWeakerNestedSandbox,
+        enableWeakerNetworkIsolation: configExt.enableWeakerNetworkIsolation,
       });
 
       // Make Node's built-in fetch() honour HTTP_PROXY / HTTPS_PROXY in this
@@ -865,6 +872,7 @@ export default function (pi: ExtensionAPI) {
         const configExt = config as unknown as {
           ignoreViolations?: Record<string, string[]>;
           enableWeakerNestedSandbox?: boolean;
+          enableWeakerNetworkIsolation?: boolean;
         };
 
         await SandboxManager.initialize({
@@ -872,6 +880,7 @@ export default function (pi: ExtensionAPI) {
           filesystem: config.filesystem,
           ignoreViolations: configExt.ignoreViolations,
           enableWeakerNestedSandbox: configExt.enableWeakerNestedSandbox,
+          enableWeakerNetworkIsolation: configExt.enableWeakerNetworkIsolation,
         });
 
         sandboxEnabled = true;
