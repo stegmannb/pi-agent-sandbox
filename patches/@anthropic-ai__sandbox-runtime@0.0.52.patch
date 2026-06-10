@@ -1,0 +1,15 @@
+diff --git a/dist/sandbox/macos-sandbox-utils.js b/dist/sandbox/macos-sandbox-utils.js
+index 2775bb97d00cd1b823dabcd19f19745af4c9deae..e43b952510921f444989afd5d9aafa2a9a42f0e4 100644
+--- a/dist/sandbox/macos-sandbox-utils.js
++++ b/dist/sandbox/macos-sandbox-utils.js
+@@ -21,9 +21,7 @@ export function macGetMandatoryDenyPatterns(allowGitConfig = false) {
+         denyPaths.push(path.resolve(cwd, dirName));
+         denyPaths.push(`**/${dirName}/**`);
+     }
+-    // Git hooks are always blocked for security
+-    denyPaths.push(path.resolve(cwd, '.git/hooks'));
+-    denyPaths.push('**/.git/hooks/**');
++    // pi-agent-sandbox patch: git hooks writes allowed (pre-commit install)
+     // Git config - conditionally blocked based on allowGitConfig setting
+     if (!allowGitConfig) {
+         denyPaths.push(path.resolve(cwd, '.git/config'));
