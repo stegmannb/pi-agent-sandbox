@@ -1,0 +1,35 @@
+{
+  "enabled": true,
+  "debug": false,
+  "defaultProfile": "auto",
+  "classifierModel": {
+    "model": "google/gemini-flash-latest",
+    "thinking": "off"
+  },
+  "defaultModel": "anthropic/claude-sonnet-4-5",
+  "profiles": {
+    "auto": {
+      "defaultModel": "anthropic/claude-sonnet-4-5",
+      "models": [
+        {
+          "model": "anthropic/claude-sonnet-4-5",
+          "strengths": ["architecture", "planning", "coding", "debugging", "review", "tool-use"],
+          "quality": 0.92,
+          "cost": 0.45,
+          "latency": 0.55,
+          "thinking": "medium",
+          "supports": { "images": true, "reasoning": true, "tools": true }
+        },
+        {
+          "model": "google/gemini-flash-latest",
+          "strengths": ["summary", "lookup", "coding", "fast"],
+          "quality": 0.68,
+          "cost": 0.95,
+          "latency": 0.9,
+          "thinking": "low",
+          "supports": { "images": true, "reasoning": true, "tools": true }
+        }
+      ]
+    }
+  }
+}

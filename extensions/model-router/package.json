@@ -1,0 +1,30 @@
+{
+  "name": "pi-model-router",
+  "version": "0.1.0",
+  "description": "Classifier-based model routing extension for pi",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "model-router"
+  ],
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "author": "Bastian Stegmann",
+  "license": "MIT",
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "^0.61.0",
+    "@mariozechner/pi-coding-agent": "^0.61.0"
+  },
+  "peerDependenciesMeta": {
+    "@mariozechner/pi-ai": {
+      "optional": true
+    },
+    "@mariozechner/pi-coding-agent": {
+      "optional": true
+    }
+  }
+}

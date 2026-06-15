@@ -9,5 +9,5 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["index.ts"]
+  "include": ["index.ts", "extensions/**/*.ts"]
 }

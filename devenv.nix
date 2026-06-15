@@ -9,11 +9,13 @@
 
   packages = with pkgs; [
     git
+    nixfmt-rfc-style
   ];
 
   enterShell = ''
-    echo "pi-sandbox devenv ready"
+    echo "pi-sandbox devenv ready (devenv 2.x)"
     echo "Use: pnpm install && pnpm run check"
+    echo "Build router package: nix build .#pi-model-router"
   '';
 
   enterTest = ''
@@ -21,5 +23,6 @@
     pnpm run ci:fmt
     pnpm run ci:lint
     pnpm run ci:check
+    nix build .#pi-model-router
   '';
 }

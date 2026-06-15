@@ -1,6 +1,10 @@
 allowBuilds:
-  '@google/genai': set this to true or false
-  koffi: set this to true or false
-  protobufjs: set this to true or false
+  '@google/genai': true
+  koffi: true
+  protobufjs: true
+onlyBuiltDependencies:
+  - "@google/genai"
+  - koffi
+  - protobufjs
 patchedDependencies:
   '@anthropic-ai/sandbox-runtime@0.0.52': patches/@anthropic-ai__sandbox-runtime@0.0.52.patch

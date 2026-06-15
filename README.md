@@ -158,14 +158,59 @@ Based on code from
 by Mario Zechner, used under the
 [MIT License](https://github.com/badlogic/pi-mono/blob/main/LICENSE).
 
+## Model Router Prototype
+
+This repository also contains an independent classifier-based model-router prototype at
+`extensions/model-router/`. It is intentionally not part of the packaged sandbox extension yet.
+Load it explicitly while testing:
+
+```bash
+pi -e ./extensions/model-router/index.ts
+```
+
+Or build the first-class Pi package with Nix:
+
+```bash
+nix build .#pi-model-router
+pi install ./result/model-router
+```
+
+The Nix package installs the extension under `model-router/` and includes an
+`extensions/model-router/package.json` manifest named `pi-model-router`, so Pi
+shows the package/extension with the correct router name instead of the sandbox
+package name.
+
+Copy `model-router.example.json` to either `~/.pi/agent/model-router.json` or
+`.pi/model-router.json` to customize the classifier and candidate models.
+
+The router flow is:
+
+1. `before_agent_start` calls the configured classifier model.
+2. The classifier returns structured task metadata, not a direct model choice.
+3. A score-based selector chooses a configured real model.
+4. The extension calls `pi.setModel()`, so Pi shows the real model and normal cost tracking applies.
+5. `/router status` and `/router why` explain the last decision.
+
+Available commands:
+
+```text
+/router status
+/router why
+/router reload
+/router profile <name>
+/router on|off
+/router debug on|off
+```
+
 ## Development
 
-- `flake.nix` exposes the extension as `packages.<system>.default`
-- `nix/package.nix` contains the runtime packaging logic used by the flake
+- `.envrc` wires direnv to devenv 2.x via `use devenv`
 - `devenv.nix` defines the project development environment
 - `devenv.yaml` pins devenv inputs
 - `devenv.lock` is generated via `devenv update`
-- `.envrc` wires direnv to devenv
+- `flake.nix` exposes `.#pi-sandbox` and `.#pi-model-router`
+- `nix/package.nix` contains the sandbox packaging logic used by the flake
+- `nix/model-router-package.nix` packages the router as `result/model-router/`
 
 Run `pnpm install` once after entering the shell, then validate with:
 
