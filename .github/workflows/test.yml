@@ -15,10 +15,14 @@ jobs:
     runs-on: [k8s-executor-small, amd64]
     steps:
       - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: npm run ci:fmt
       - run: npm run ci:lint
       - run: npm run ci:check
