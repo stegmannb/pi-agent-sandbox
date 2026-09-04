@@ -192,6 +192,18 @@ class Tier0PolicyTests(unittest.TestCase):
 
         self.assert_repository_rejected(mutate, "script test must be exact")
 
+    def test_oxc_runner_cannot_be_weakened(self) -> None:
+        def mutate(repository: Path) -> None:
+            path = repository / ".forgejo/ci/run-oxc.mjs"
+            path.write_text(
+                path.read_text(encoding="utf-8").replace(
+                    "delete env.NAPI_RS_NATIVE_LIBRARY_PATH;\n", "", 1
+                ),
+                encoding="utf-8",
+            )
+
+        self.assert_repository_rejected(mutate, "Oxc runner must remain exact")
+
     def test_nix_gate_cannot_skip_the_sandbox_package(self) -> None:
         def mutate(repository: Path) -> None:
             path = repository / ".forgejo/ci/nix.sh"

@@ -102,18 +102,39 @@ onlyBuiltDependencies:
   - "@google/genai"
   - koffi
   - protobufjs
-supportedArchitectures:
-  os:
-    - current
-    - linux
-  cpu:
-    - current
-    - x64
-  libc:
-    - glibc
-    - musl
 patchedDependencies:
   '@anthropic-ai/sandbox-runtime@0.0.52': patches/@anthropic-ai__sandbox-runtime@0.0.52.patch
+"""
+EXPECTED_OXC_RUNNER = """import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const [tool, ...args] = process.argv.slice(2);
+const glibcBindings = {
+  oxfmt: "@oxfmt/binding-linux-x64-gnu",
+  oxlint: "@oxlint/binding-linux-x64-gnu",
+};
+
+if (!(tool in glibcBindings)) {
+  console.error(`unsupported Oxc tool: ${tool ?? "missing"}`);
+  process.exit(2);
+}
+
+const env = { ...process.env };
+delete env.NAPI_RS_NATIVE_LIBRARY_PATH;
+
+const report = process.report?.getReport();
+if (process.platform === "linux" && process.arch === "x64" && report?.header?.glibcVersionRuntime) {
+  const toolRequire = createRequire(require.resolve(tool));
+  env.NAPI_RS_NATIVE_LIBRARY_PATH = toolRequire.resolve(glibcBindings[tool]);
+}
+
+const command = process.platform === "win32" ? `${tool}.cmd` : tool;
+const result = spawnSync(command, args, { env, stdio: "inherit" });
+if (result.error) {
+  throw result.error;
+}
+process.exit(result.status ?? 1);
 """
 CI_GATE_SPECS = {
     "policy": (
@@ -166,12 +187,24 @@ EXPECTED_GATE_COMMANDS = {
     "test": "pnpm run verify",
 }
 EXPECTED_PACKAGE_SCRIPTS = {
-    "fmt": "oxfmt index.ts src/**/*.ts extensions/**/*.ts test/**/*.ts",
-    "lint": "oxlint index.ts src/**/*.ts extensions/**/*.ts test/**/*.ts",
+    "fmt": (
+        "oxfmt .forgejo/ci/run-oxc.mjs "
+        "index.ts src/**/*.ts extensions/**/*.ts test/**/*.ts"
+    ),
+    "lint": (
+        "oxlint .forgejo/ci/run-oxc.mjs "
+        "index.ts src/**/*.ts extensions/**/*.ts test/**/*.ts"
+    ),
     "check": "tsc --noEmit",
     "test": "node --test test/**/*.test.ts",
-    "ci:fmt": "oxfmt --check index.ts src/**/*.ts extensions/**/*.ts test/**/*.ts",
-    "ci:lint": "pnpm run lint",
+    "ci:fmt": (
+        "node .forgejo/ci/run-oxc.mjs oxfmt --check .forgejo/ci/run-oxc.mjs "
+        "index.ts src/**/*.ts extensions/**/*.ts test/**/*.ts"
+    ),
+    "ci:lint": (
+        "node .forgejo/ci/run-oxc.mjs oxlint .forgejo/ci/run-oxc.mjs "
+        "index.ts src/**/*.ts extensions/**/*.ts test/**/*.ts"
+    ),
     "ci:check": "pnpm run check",
     "ci:test": "pnpm run test",
     "verify": (
@@ -427,6 +460,15 @@ def validate_gate_scripts(root: Path) -> None:
             raise PolicyError(f"Forgejo gate script {name} must be exact")
         if not path.stat().st_mode & stat.S_IXUSR:
             raise PolicyError(f"Forgejo gate script {name} must be executable")
+    support_files = {
+        path.name
+        for path in script_dir.iterdir()
+        if path.is_file() and path.suffix != ".sh"
+    }
+    if support_files != {"run-oxc.mjs"}:
+        raise PolicyError("Forgejo gate support-file inventory must be exact")
+    if (script_dir / "run-oxc.mjs").read_text(encoding="utf-8") != EXPECTED_OXC_RUNNER:
+        raise PolicyError("Forgejo Oxc runner must remain exact")
 
 
 def validate_package_contract(root: Path) -> None:
