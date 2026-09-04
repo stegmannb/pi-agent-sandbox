@@ -215,9 +215,7 @@ Available commands:
 Run `pnpm install` once after entering the shell, then validate with:
 
 ```bash
-pnpm run ci:fmt
-pnpm run ci:lint
-pnpm run ci:check
+pnpm run verify
 ```
 
 ## Trusted process-host integration
@@ -226,3 +224,13 @@ SDK hosts that need to verify sandbox readiness before starting a child agent
 can use the [versioned protection snapshot API](docs/protection-snapshot.md).
 It requires early source capture and the documented native extension entry.
 Ordinary sandbox installation and network policy are unchanged.
+
+## Forgejo Tier 0
+
+The Forgejo copy is a Tier-0 process and filesystem security boundary with
+release profile `none`. Every pull request runs unconditional Policy,
+Typecheck, Lint, Format, Test, and Nix gates against its exact head. Forgejo
+does not publish this package; the existing GitHub/npm release workflow remains
+the separate upstream release boundary. See
+[`docs/forgejo-tier-0.md`](docs/forgejo-tier-0.md) for the enforced contract and
+Owner-Apply checklist.

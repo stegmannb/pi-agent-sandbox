@@ -24,10 +24,44 @@
           pkgs = import nixpkgs { inherit system; };
           pi-sandbox = pkgs.callPackage ./nix/package.nix { };
           pi-model-router = pkgs.callPackage ./nix/model-router-package.nix { };
+          pythonWithYaml = pkgs.python3.withPackages (pythonPackages: [
+            pythonPackages.pyyaml
+          ]);
         in
         {
           default = pi-sandbox;
           inherit pi-sandbox pi-model-router;
+
+          node-tools = pkgs.buildEnv {
+            name = "pi-agent-sandbox-node-tools";
+            paths = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.nodejs_22
+              pkgs.pnpm
+            ];
+          };
+
+          nix-tools = pkgs.buildEnv {
+            name = "pi-agent-sandbox-nix-tools";
+            paths = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.git
+            ];
+          };
+
+          policy-tools = pkgs.buildEnv {
+            name = "pi-agent-sandbox-policy-tools";
+            paths = [
+              pkgs.actionlint
+              pkgs.bash
+              pkgs.git
+              pkgs.ruff
+              pkgs.shellcheck
+              pythonWithYaml
+            ];
+          };
         }
       );
 

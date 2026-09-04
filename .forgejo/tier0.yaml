@@ -1,0 +1,38 @@
+schema: 1
+tier: 0
+releaseProfile: none
+securityBoundary: process-and-filesystem-sandbox
+role: canonical process and filesystem safety boundary for agent tool execution
+owner: Bastian
+defaultBranch: main
+policy: docs/forgejo-tier-0.md
+requiredChecks:
+  - ci / policy (pull_request)
+  - ci / typecheck (pull_request)
+  - ci / lint (pull_request)
+  - ci / format (pull_request)
+  - ci / test (pull_request)
+  - ci / nix (pull_request)
+forgejoRelease:
+  enabled: false
+  declarations: forbidden
+  tags: forbidden
+  forgejoReleases: forbidden
+  packages: forbidden
+  publishCredentials: forbidden
+externalReleaseBoundary:
+  platform: GitHub
+  workflow: .github/workflows/release.yml
+  registry: npm
+  forgejoExecution: forbidden
+  taskScope: unchanged
+protectionAudit:
+  method: forgejo-owner-api-and-ui
+  verifiedAt: null
+  verifiedBy: null
+  evidence: pending Owner-Apply and readback for main, merge, review, checks, tags, releases, and packages
+  reviewDate: "2026-09-30"
+  triggers:
+    - forgejo-upgrade
+    - protection-setting-change
+ownerApplyTask: HL-0081

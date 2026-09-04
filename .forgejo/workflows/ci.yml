@@ -1,0 +1,178 @@
+name: ci
+
+"on":
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  NIX_CONFIG: |
+    accept-flake-config = true
+    experimental-features = nix-command flakes
+    fallback = true
+    sandbox = false
+
+jobs:
+  policy:
+    runs-on: [k8s-executor-small, amd64]
+    timeout-minutes: 15
+    container:
+      image: git.forest-arowana.ts.net/bastian/forgejo-runner-k8s@sha256:f038e4345561f4b0bb82bc31c9f6779394db574287779a437f261b7ec409e826
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Stage exact head on ephemeral disk
+        shell: bash
+        run: |
+          set -euo pipefail
+          ci_workspace="$RUNNER_TEMP/pi-agent-sandbox"
+          install -d "$ci_workspace"
+          cp -a "$GITHUB_WORKSPACE/." "$ci_workspace/"
+          echo "CI_WORKSPACE=$ci_workspace" >> "$GITHUB_ENV"
+      - name: Validate Tier-0 and Forgejo no-release policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CI_WORKSPACE"
+          tools="$(nix build --no-link --print-out-paths .#policy-tools)"
+          export PATH="$tools/bin:$PATH"
+          bash .forgejo/ci/policy.sh "$GITHUB_EVENT_PATH"
+
+  typecheck:
+    runs-on: [k8s-executor-small, amd64]
+    timeout-minutes: 15
+    container:
+      image: git.forest-arowana.ts.net/bastian/forgejo-runner-k8s@sha256:f038e4345561f4b0bb82bc31c9f6779394db574287779a437f261b7ec409e826
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Stage exact head on ephemeral disk
+        shell: bash
+        run: |
+          set -euo pipefail
+          ci_workspace="$RUNNER_TEMP/pi-agent-sandbox"
+          install -d "$ci_workspace"
+          cp -a "$GITHUB_WORKSPACE/." "$ci_workspace/"
+          echo "CI_WORKSPACE=$ci_workspace" >> "$GITHUB_ENV"
+      - name: Type-check sandbox boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CI_WORKSPACE"
+          tools="$(nix build --no-link --print-out-paths .#node-tools)"
+          export PATH="$tools/bin:$PATH"
+          bash .forgejo/ci/typecheck.sh
+
+  lint:
+    runs-on: [k8s-executor-small, amd64]
+    timeout-minutes: 15
+    container:
+      image: git.forest-arowana.ts.net/bastian/forgejo-runner-k8s@sha256:f038e4345561f4b0bb82bc31c9f6779394db574287779a437f261b7ec409e826
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Stage exact head on ephemeral disk
+        shell: bash
+        run: |
+          set -euo pipefail
+          ci_workspace="$RUNNER_TEMP/pi-agent-sandbox"
+          install -d "$ci_workspace"
+          cp -a "$GITHUB_WORKSPACE/." "$ci_workspace/"
+          echo "CI_WORKSPACE=$ci_workspace" >> "$GITHUB_ENV"
+      - name: Lint sandbox boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CI_WORKSPACE"
+          tools="$(nix build --no-link --print-out-paths .#node-tools)"
+          export PATH="$tools/bin:$PATH"
+          bash .forgejo/ci/lint.sh
+
+  format:
+    runs-on: [k8s-executor-small, amd64]
+    timeout-minutes: 15
+    container:
+      image: git.forest-arowana.ts.net/bastian/forgejo-runner-k8s@sha256:f038e4345561f4b0bb82bc31c9f6779394db574287779a437f261b7ec409e826
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Stage exact head on ephemeral disk
+        shell: bash
+        run: |
+          set -euo pipefail
+          ci_workspace="$RUNNER_TEMP/pi-agent-sandbox"
+          install -d "$ci_workspace"
+          cp -a "$GITHUB_WORKSPACE/." "$ci_workspace/"
+          echo "CI_WORKSPACE=$ci_workspace" >> "$GITHUB_ENV"
+      - name: Check sandbox formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CI_WORKSPACE"
+          tools="$(nix build --no-link --print-out-paths .#node-tools)"
+          export PATH="$tools/bin:$PATH"
+          bash .forgejo/ci/format.sh
+
+  test:
+    runs-on: [k8s-executor-small, amd64]
+    timeout-minutes: 15
+    container:
+      image: git.forest-arowana.ts.net/bastian/forgejo-runner-k8s@sha256:f038e4345561f4b0bb82bc31c9f6779394db574287779a437f261b7ec409e826
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Stage exact head on ephemeral disk
+        shell: bash
+        run: |
+          set -euo pipefail
+          ci_workspace="$RUNNER_TEMP/pi-agent-sandbox"
+          install -d "$ci_workspace"
+          cp -a "$GITHUB_WORKSPACE/." "$ci_workspace/"
+          echo "CI_WORKSPACE=$ci_workspace" >> "$GITHUB_ENV"
+      - name: Run complete sandbox verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CI_WORKSPACE"
+          tools="$(nix build --no-link --print-out-paths .#node-tools)"
+          export PATH="$tools/bin:$PATH"
+          bash .forgejo/ci/test.sh
+
+  nix:
+    runs-on: [k8s-executor-small, amd64]
+    timeout-minutes: 20
+    container:
+      image: git.forest-arowana.ts.net/bastian/forgejo-runner-k8s@sha256:f038e4345561f4b0bb82bc31c9f6779394db574287779a437f261b7ec409e826
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Stage exact head on ephemeral disk
+        shell: bash
+        run: |
+          set -euo pipefail
+          ci_workspace="$RUNNER_TEMP/pi-agent-sandbox"
+          install -d "$ci_workspace"
+          cp -a "$GITHUB_WORKSPACE/." "$ci_workspace/"
+          echo "CI_WORKSPACE=$ci_workspace" >> "$GITHUB_ENV"
+      - name: Build sandbox Nix packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$CI_WORKSPACE"
+          tools="$(nix build --no-link --print-out-paths .#nix-tools)"
+          export PATH="$tools/bin:$PATH"
+          bash .forgejo/ci/nix.sh

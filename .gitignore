@@ -3,3 +3,5 @@
 .devenv.flake.nix
 .direnv/
 node_modules/
+__pycache__/
+*.pyc
