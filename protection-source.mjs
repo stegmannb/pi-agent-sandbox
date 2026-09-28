@@ -52,7 +52,7 @@ if (preloaded && typeof nodeModule.registerHooks === "function")
         if (previouslyCached.has(result.url)) unknown.add(result.url);
         if (!files.has(result.url))
           files.set(result.url, { path, sha256: hash(readFileSync(path)) });
-        scopesAtLoad.set(result.url, captureScopes([{ path }]));
+        scopesAtLoad.set(result.url, captureScopeExpectation(path));
       }
       if (context.parentURL) {
         const deps = edges.get(context.parentURL) ?? new Set();
@@ -69,7 +69,7 @@ if (preloaded && typeof nodeModule.registerHooks === "function")
       }
       const path = fileURLToPath(url);
       const bytes = readFileSync(path);
-      const scopes = captureScopes([{ path }]);
+      const scopes = captureScopeExpectation(path);
       scopesAtLoad.set(url, scopes);
       // Native Node normally refuses TypeScript inside node_modules. Strip only
       // our own two modules with Node's public type eraser, from measured bytes.
@@ -111,11 +111,14 @@ export function captureSources(entry) {
     if (realpathSync(ref.path) !== ref.path || hash(readFileSync(ref.path)) !== ref.sha256) {
       throw new Error("source drift");
     }
-    if (
-      url !== import.meta.url &&
-      JSON.stringify(captureScopes([ref])) !== JSON.stringify(scopesAtLoad.get(url))
-    )
-      throw new Error("package scope drift");
+    if (url !== import.meta.url) {
+      const expected = scopesAtLoad.get(url);
+      if (!expected) throw new Error("package scope drift");
+      for (const [path, sha256] of expected) {
+        if ((existsSync(path) ? hash(readFileSync(path)) : null) !== sha256)
+          throw new Error("package scope drift");
+      }
+    }
     refs.set(ref.path, { ...ref });
     for (const child of edges.get(url) ?? []) visit(child);
   }
@@ -123,6 +126,22 @@ export function captureSources(entry) {
   // Include the trusted bootstrap, whose lifetime must match the loaded graph.
   refs.set(bootstrap, { ...files.get(import.meta.url) });
   return [...refs.values()].sort((a, b) => a.path.localeCompare(b.path));
+}
+
+// Private load-time expectations, including absent ancestors, in the original
+// leaf-to-root read order. Publish only a complete, immutable list. These are
+// comparison values, never fresh observations reused by captureSources.
+function captureScopeExpectation(sourcePath) {
+  const expected = [];
+  let directory = dirname(sourcePath);
+  while (true) {
+    const path = join(directory, "package.json");
+    expected.push(Object.freeze([path, existsSync(path) ? hash(readFileSync(path)) : null]));
+    const parent = dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
+  return Object.freeze(expected);
 }
 
 /** Package scopes influence module resolution; freeze their presence and bytes. */

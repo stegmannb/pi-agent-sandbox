@@ -64,6 +64,21 @@ paths and SHA-256 hashes. Hosts must run parent and child against the same
 installed deployment. The Node version, platform and architecture also enter
 the effective policy digest.
 
+The bootstrap privately records each module's complete package-scope expectations
+in ancestor read order, including absent paths. Each source check resolves its
+real path and reads and hashes its full bytes, then freshly checks every scope
+from the module directory to the filesystem root before visiting dependencies.
+Shared ancestors are checked again for every module. The immutable load-time
+list saves path construction, maps, sorting and JSON comparison, but never
+reuses a previous check's observations. Missing load-time expectations refuse.
+The public `captureScopes` result stays path-sorted, and `loadedSources.check`
+still performs its separate final scope check after the graph check.
+
+These checks are sequential observations, not an atomic filesystem snapshot.
+They can detect a scope change between source reads even when it is restored
+later. A change after the last relevant read may escape that invocation and is
+checked afresh on the next invocation.
+
 ## Request and response
 
 ```ts
@@ -163,6 +178,16 @@ pnpm test
 pnpm run test:loader
 pnpm run test:os
 ```
+
+To compare scope-check preparation against an earlier bootstrap, extract that
+revision's `protection-source.mjs` and pass its absolute path to
+`node tests/compare-source-capture.mjs`. The runner alternates six fresh processes
+at the same fixture paths using the installed Pi 0.73 SDK. It asserts matching
+source/scope digests, actual read/presence/realpath traces and refusal results,
+and reports five capture and full-proof timing samples per process. Only the
+bootstrap's own content differs between variants; it remains fully verified.
+Timing samples run without IO instrumentation. This is a local comparison, not
+a kernel-protection test or a portable latency guarantee.
 
 Unit tests register the actual extension with controlled SandboxManager methods
 for deterministic startup, race, mutation and drift cases. Loader tests use the
