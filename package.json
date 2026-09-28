@@ -28,12 +28,15 @@
   },
   "homepage": "https://github.com/carderne/pi-sandbox",
   "scripts": {
-    "fmt": "oxfmt index.ts extensions/**/*.ts",
-    "lint": "oxlint index.ts extensions/**/*.ts",
+    "fmt": "oxfmt index.ts protection.ts *.mts *.mjs tests/*.mjs extensions/**/*.ts",
+    "lint": "oxlint index.ts protection.ts *.mjs tests/*.mjs extensions/**/*.ts",
     "check": "tsc --noEmit",
-    "ci:fmt": "oxfmt --check index.ts extensions/**/*.ts",
+    "ci:fmt": "oxfmt --check index.ts protection.ts *.mts *.mjs tests/*.mjs extensions/**/*.ts",
     "ci:lint": "pnpm run lint",
-    "ci:check": "pnpm run check"
+    "ci:check": "pnpm run check",
+    "test": "node --import ./protection-source.mjs --test tests/*.test.mjs",
+    "test:loader": "node tests/run-loader.mjs && node tests/run-installed.mjs",
+    "test:os": "node tests/run-os.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "^0.0.52"

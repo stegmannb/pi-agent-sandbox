@@ -1,0 +1,42 @@
+name: sandbox protection validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NIX_CONFIG: |
+    experimental-features = nix-command flakes
+    sandbox = false
+    keep-build-log = false
+  XDG_RUNTIME_DIR: /tmp/forgejo-runtime
+
+jobs:
+  protection:
+    runs-on: [k8s-executor-medium, amd64]
+    timeout-minutes: 20
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Check locked source and real Pi loader compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 0700 "$XDG_RUNTIME_DIR"
+          nix shell --inputs-from . nixpkgs#nodejs_22 nixpkgs#pnpm_10 nixpkgs#bubblewrap nixpkgs#socat nixpkgs#ripgrep --command bash -euo pipefail -c '
+            pnpm install --frozen-lockfile
+            pnpm --dir tests/pi-073 install --ignore-workspace --ignore-scripts --frozen-lockfile
+            pnpm run ci:fmt
+            pnpm run ci:lint
+            pnpm run ci:check
+            pnpm test
+            pnpm run test:loader
+            pnpm run test:os
+            git diff --exit-code
+          '
+          nix build .#pi-model-router .#pi-sandbox --no-link

@@ -8,3 +8,5 @@ onlyBuiltDependencies:
   - protobufjs
 patchedDependencies:
   '@anthropic-ai/sandbox-runtime@0.0.52': patches/@anthropic-ai__sandbox-runtime@0.0.52.patch
+  'oxfmt@0.33.0': patches/oxfmt@0.33.0.patch
+  'oxlint@1.59.0': patches/oxlint@1.59.0.patch

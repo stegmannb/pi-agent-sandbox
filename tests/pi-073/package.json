@@ -1,0 +1,6 @@
+{
+  "name": "pasa-sandbox-pi-073-test",
+  "private": true,
+  "type": "module",
+  "dependencies": { "@mariozechner/pi-coding-agent": "0.73.0" }
+}

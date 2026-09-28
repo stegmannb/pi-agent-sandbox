@@ -1,0 +1,16 @@
+diff --git a/dist/bindings-BiJhCnYE.js b/dist/bindings-BiJhCnYE.js
+index 1bfe3e487d7f22043b68ad8f4daf12995e7a7548..7a192c0e9c91a74e0c65e62c5f13779316cb06e4 100644
+--- a/dist/bindings-BiJhCnYE.js
++++ b/dist/bindings-BiJhCnYE.js
+@@ -7,6 +7,11 @@ const { readFileSync } = require("node:fs");
+ let nativeBinding = null;
+ const loadErrors = [];
+ const isMusl = () => {
++	// Nix Node can use glibc even when the host's /usr/bin/ldd uses musl.
++	if (process.platform === "linux" && typeof process.report?.getReport === "function") {
++		process.report.excludeNetwork = true;
++		if (process.report.getReport()?.header?.glibcVersionRuntime) return false;
++	}
+ 	let musl = false;
+ 	if (process.platform === "linux") {
+ 		musl = isMuslFromFilesystem();

@@ -219,3 +219,10 @@ pnpm run ci:fmt
 pnpm run ci:lint
 pnpm run ci:check
 ```
+
+## Trusted process-host integration
+
+SDK hosts that need to verify sandbox readiness before starting a child agent
+can use the [versioned protection snapshot API](docs/protection-snapshot.md).
+It requires early source capture and the documented native extension entry.
+Ordinary sandbox installation and network policy are unchanged.

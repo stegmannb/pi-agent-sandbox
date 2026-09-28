@@ -59,10 +59,26 @@
  * Linux also requires: bubblewrap, socat, ripgrep
  */
 
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, isAbsolute } from "node:path";
+import { promisify } from "node:util";
+import { nativeEntryIsObserved } from "./protection-source.mjs";
+import {
+  SNAPSHOT_CHANNEL,
+  PROTECTION_ID,
+  canonicalCwd,
+  configuration,
+  digest,
+  effectiveState,
+  environment,
+  loadedSources,
+  type SnapshotRequest,
+  type SnapshotResponse,
+  type Reason,
+} from "./protection.ts";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
@@ -70,6 +86,13 @@ import {
   createBashTool,
   isToolCallEventType,
 } from "@mariozechner/pi-coding-agent";
+
+const sourceProof = nativeEntryIsObserved(
+  import.meta.url,
+  (import.meta as ImportMeta & { pasaReceipt?: string }).pasaReceipt,
+)
+  ? loadedSources(new URL("./pasa-extension.mjs", import.meta.url).href)
+  : undefined;
 
 interface SandboxConfig extends SandboxRuntimeConfig {
   enabled?: boolean;
@@ -141,23 +164,22 @@ const DEFAULT_CONFIG: SandboxConfig = {
   },
 };
 
-function loadConfig(cwd: string): SandboxConfig {
+function loadConfig(cwd: string, capturedFiles?: [string, string | null][]): SandboxConfig {
   const projectConfigPath = join(cwd, ".pi", "sandbox.json");
   const agentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
   const globalConfigPath = join(agentDir, "sandbox.json");
 
-  let globalConfig: Partial<SandboxConfig> = {};
-  let projectConfig: Partial<SandboxConfig> = {};
-
-  if (existsSync(globalConfigPath)) {
-    const raw = JSON.parse(readFileSync(globalConfigPath, "utf-8"));
-    globalConfig = validateConfig(raw, globalConfigPath);
-  }
-
-  if (existsSync(projectConfigPath)) {
-    const raw = JSON.parse(readFileSync(projectConfigPath, "utf-8"));
-    projectConfig = validateConfig(raw, projectConfigPath);
-  }
+  const readCandidate = (path: string): Partial<SandboxConfig> => {
+    if (!existsSync(path)) {
+      capturedFiles?.push([path, null]);
+      return {};
+    }
+    const bytes = readFileSync(path);
+    capturedFiles?.push([path, createHash("sha256").update(bytes).digest("hex")]);
+    return validateConfig(JSON.parse(bytes.toString("utf8")), path);
+  };
+  const globalConfig = readCandidate(globalConfigPath);
+  const projectConfig = readCandidate(projectConfigPath);
 
   return deepMerge(deepMerge(DEFAULT_CONFIG, globalConfig), projectConfig);
 }
@@ -423,6 +445,157 @@ export default function (pi: ExtensionAPI) {
   let sandboxInitialized = false;
   let userDisabled = false; // set by /sandbox-toggle; prevents session_start from re-enabling
 
+  let generation = 0;
+  let liveContext: ExtensionContext | undefined;
+  let sessionId: string | undefined;
+  let lifecycle: "idle" | "pending" | "ready" | "failed" = "idle";
+  let runtimeMutation = false;
+  let initializedState:
+    | {
+        cwd: string;
+        config: SandboxConfig;
+        files: [string, string | null][];
+        env: ReturnType<typeof environment>;
+        managerDigest: string;
+      }
+    | undefined;
+  let osQueue: Promise<unknown> = Promise.resolve();
+  const serialized = <T>(operation: () => Promise<T>): Promise<T> => {
+    const next = osQueue.then(operation, operation);
+    osQueue = next.catch(() => {});
+    return next;
+  };
+  function mutate() {
+    runtimeMutation = true;
+    generation++;
+  }
+  function configFiles(cwd: string) {
+    const paths = getConfigPaths(cwd);
+    return configuration([paths.globalPath, paths.projectPath]);
+  }
+  function reproducibleTarget(target: string, state: NonNullable<typeof initializedState>) {
+    try {
+      return (
+        typeof target === "string" &&
+        canonicalCwd(target) === target &&
+        digest(loadConfig(target)) === digest(state.config) &&
+        digest(configFiles(target).map(([, hash]) => hash)) ===
+          digest(state.files.map(([, hash]) => hash))
+      );
+    } catch {
+      return false;
+    }
+  }
+  // This also verifies the kernel accepts the generated profile. initialize()
+  // alone only stores settings on some platforms.
+  async function initializeOS(config: SandboxRuntimeConfig) {
+    try {
+      await SandboxManager.reset();
+      await SandboxManager.initialize(config);
+      const command = await SandboxManager.wrapWithSandbox("true");
+      await promisify(execFile)("bash", ["-c", command], { timeout: 10000 });
+    } catch {
+      throw new Error("Sandbox OS initialization failed");
+    }
+  }
+  const answered = new Set<string>();
+  pi.events.on(SNAPSHOT_CHANNEL, (data) => {
+    if (!data || typeof data !== "object") return;
+    const request = data as SnapshotRequest;
+    if (
+      request.version !== 1 ||
+      request.protectionId !== PROTECTION_ID ||
+      typeof request.requestId !== "string" ||
+      typeof request.respond !== "function" ||
+      answered.has(request.requestId)
+    )
+      return;
+    answered.add(request.requestId);
+    const base = {
+      version: 1 as const,
+      requestId: request.requestId,
+      protectionId: PROTECTION_ID,
+    } as const;
+    const refuse = (reason: Reason): SnapshotResponse => ({
+      ...base,
+      status: "unsupported",
+      reason,
+    });
+    let response: SnapshotResponse;
+    try {
+      if (!liveContext || !sessionId) response = refuse("NOT_INITIALIZED");
+      else if (
+        request.expectedSessionId !== sessionId ||
+        liveContext.sessionManager.getSessionId() !== sessionId
+      )
+        response = refuse("SESSION_MISMATCH");
+      else if (lifecycle === "pending" || lifecycle === "idle")
+        response = refuse("NOT_INITIALIZED");
+      else if (lifecycle === "failed") response = refuse("INITIALIZATION_FAILED");
+      else if (!sandboxEnabled || userDisabled || pi.getFlag("no-sandbox"))
+        response = refuse("DISABLED");
+      else if (runtimeMutation) response = refuse("RUNTIME_MUTATION");
+      else if (
+        (process.env.PI_CODING_AGENT_DIR && !isAbsolute(process.env.PI_CODING_AGENT_DIR)) ||
+        (process.env.PASA_SANDBOX_PI_ENTRY && !isAbsolute(process.env.PASA_SANDBOX_PI_ENTRY))
+      )
+        response = refuse("UNBACKED_CONFIGURATION");
+      else if (
+        initializedState?.config.network?.parentProxy ||
+        initializedState?.config.network?.mitmProxy
+      )
+        response = refuse("UNBACKED_CONFIGURATION");
+      else if (!sourceProof) response = refuse("UNBACKED_CONFIGURATION");
+      else if (!sourceProof.check()) response = refuse("CONFIG_DRIFT");
+      else if (!initializedState || !sandboxInitialized) response = refuse("NOT_INITIALIZED");
+      else {
+        const state = initializedState;
+        const cwd = canonicalCwd(liveContext.cwd);
+        if (
+          cwd !== state.cwd ||
+          canonicalCwd(process.cwd()) !== cwd ||
+          canonicalCwd(localCwd) !== cwd
+        )
+          response = refuse("CWD_UNREPRODUCIBLE");
+        else if (
+          digest(configFiles(cwd)) !== digest(state.files) ||
+          digest(loadConfig(cwd)) !== digest(state.config) ||
+          digest(environment()) !== digest(state.env)
+        )
+          response = refuse("CONFIG_DRIFT");
+        else if (digest(SandboxManager.getConfig()) !== state.managerDigest)
+          response = refuse("RUNTIME_MUTATION");
+        // Resolve the target independently. Identical file-backed policy is replayed
+        // with paths relative to the child cwd, without changing the parent.
+        else if (!reproducibleTarget(request.targetCwd, state))
+          response = refuse("CWD_UNREPRODUCIBLE");
+        else
+          response = {
+            ...base,
+            status: "ready",
+            binding: { cwd, sessionId, generation },
+            enabled: true,
+            initialized: true,
+            stateDigest: effectiveState(state.config, cwd),
+            codeFiles: sourceProof.refs.map((ref) => ({ ...ref })),
+            configurationFiles: state.files
+              .filter((entry): entry is [string, string] => entry[1] !== null)
+              .map(([path, sha256]) => ({ path, sha256 })),
+            environment: state.env.map((ref) => ({ ...ref })),
+            replay: {
+              kind: "file-backed",
+              verifiedCwd: request.targetCwd,
+              stateDigest: effectiveState(state.config, request.targetCwd),
+            },
+          };
+      }
+    } catch {
+      response = refuse("CONFIG_DRIFT");
+    }
+    // Callback failures are caller failures. Never send a second reply.
+    request.respond(response);
+  });
+
   // Session-temporary allowances — held in JS memory, not accessible by the agent.
   // These are added on top of whatever is in the config files.
   const sessionAllowedReadPaths: string[] = [];
@@ -451,24 +624,36 @@ export default function (pi: ExtensionAPI) {
   // picks up the new rules before the next bash subprocess starts.
 
   async function reinitializeSandbox(cwd: string): Promise<void> {
-    if (!sandboxInitialized) return;
-    const config = loadConfig(cwd);
-    try {
-      await SandboxManager.reset();
-      await SandboxManager.initialize({
-        // allowedDomains intentionally omitted → runtime proxy not injected → unrestricted network
-        network: config.network as any,
-        filesystem: {
-          ...config.filesystem,
-          denyRead: config.filesystem?.denyRead ?? [],
-          allowRead: [...(config.filesystem?.allowRead ?? []), ...sessionAllowedReadPaths],
-          allowWrite: [...(config.filesystem?.allowWrite ?? []), ...sessionAllowedWritePaths],
-          denyWrite: [...(config.filesystem?.denyWrite ?? []), ...sessionDeniedWritePaths],
-        },
-      });
-    } catch (e) {
-      console.error(`Warning: Failed to reinitialize sandbox: ${e}`);
-    }
+    const token = ++generation;
+    if (!sandboxEnabled) return;
+    lifecycle = "pending";
+    sandboxInitialized = false;
+    await serialized(async () => {
+      if (token !== generation) return;
+      try {
+        const config = loadConfig(cwd);
+        await initializeOS({
+          network: config.network as any,
+          filesystem: {
+            ...config.filesystem,
+            denyRead: config.filesystem?.denyRead ?? [],
+            allowRead: [...(config.filesystem?.allowRead ?? []), ...sessionAllowedReadPaths],
+            allowWrite: [...(config.filesystem?.allowWrite ?? []), ...sessionAllowedWritePaths],
+            denyWrite: [...(config.filesystem?.denyWrite ?? []), ...sessionDeniedWritePaths],
+          },
+        });
+        if (token !== generation) return;
+        sandboxInitialized = true;
+        lifecycle = "ready";
+        generation++;
+      } catch {
+        if (token === generation) {
+          lifecycle = "failed";
+          generation++;
+        }
+        console.error("Sandbox reinitialization failed");
+      }
+    });
   }
 
   // ── UI prompts ──────────────────────────────────────────────────────────────
@@ -518,6 +703,7 @@ export default function (pi: ExtensionAPI) {
     filePath: string,
     cwd: string,
   ): Promise<void> {
+    mutate();
     const { globalPath, projectPath } = getConfigPaths(cwd);
     if (!sessionAllowedReadPaths.includes(filePath)) sessionAllowedReadPaths.push(filePath);
     if (choice === "project") addReadPathToConfig(projectPath, filePath);
@@ -530,6 +716,7 @@ export default function (pi: ExtensionAPI) {
     filePath: string,
     cwd: string,
   ): Promise<void> {
+    mutate();
     const { globalPath, projectPath } = getConfigPaths(cwd);
     if (!sessionAllowedWritePaths.includes(filePath)) sessionAllowedWritePaths.push(filePath);
     if (choice === "project") addWritePathToConfig(projectPath, filePath);
@@ -544,7 +731,8 @@ export default function (pi: ExtensionAPI) {
     label: "bash (sandboxed)",
     async execute(id, params, signal, onUpdate, ctx) {
       const runBash = () => {
-        if (!sandboxEnabled || !sandboxInitialized) {
+        if (sandboxEnabled && !sandboxInitialized) throw new Error("Sandbox is not initialized");
+        if (!sandboxEnabled) {
           return localBash.execute(id, params, signal, onUpdate);
         }
         const sandboxedBash = createBashTool(localCwd, {
@@ -601,7 +789,8 @@ export default function (pi: ExtensionAPI) {
   // ── user_bash ──────────────────────────────────────────────────────────────
 
   pi.on("user_bash", async (_event, _ctx) => {
-    if (!sandboxEnabled || !sandboxInitialized) return;
+    if (sandboxEnabled && !sandboxInitialized) throw new Error("Sandbox is not initialized");
+    if (!sandboxEnabled) return;
     return { operations: createSandboxedBashOps() };
   });
 
@@ -686,6 +875,7 @@ export default function (pi: ExtensionAPI) {
   // via the shared pi.events bus without touching config files.
 
   pi.events.on("sandbox:allow-write", (data) => {
+    mutate();
     const { path } = data as { path: string };
     if (!sessionAllowedWritePaths.includes(path)) {
       sessionAllowedWritePaths.push(path);
@@ -696,6 +886,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.events.on("sandbox:deny-write", (data) => {
+    mutate();
     const { path } = data as { path: string };
     if (!sessionDeniedWritePaths.includes(path)) {
       sessionDeniedWritePaths.push(path);
@@ -706,6 +897,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.events.on("sandbox:allow-read", (data) => {
+    mutate();
     const { path } = data as { path: string };
     if (!sessionAllowedReadPaths.includes(path)) {
       sessionAllowedReadPaths.push(path);
@@ -716,6 +908,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.events.on("sandbox:reset-session", () => {
+    mutate();
     sessionAllowedReadPaths.length = 0;
     sessionAllowedWritePaths.length = 0;
     sessionDeniedWritePaths.length = 0;
@@ -727,10 +920,17 @@ export default function (pi: ExtensionAPI) {
   // ── session_start ───────────────────────────────────────────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
+    const token = ++generation;
+    liveContext = ctx;
+    sessionId = ctx.sessionManager.getSessionId();
+    lifecycle = "pending";
+    initializedState = undefined;
+    sandboxInitialized = false;
     const noSandbox = pi.getFlag("no-sandbox") as boolean;
 
     if (noSandbox) {
       sandboxEnabled = false;
+      lifecycle = "ready";
       ctx.ui.setStatus("sandbox", "🔓 Sandbox: off");
       ctx.ui.notify("Sandbox disabled via --no-sandbox", "warning");
       return;
@@ -738,16 +938,19 @@ export default function (pi: ExtensionAPI) {
 
     if (userDisabled) {
       sandboxEnabled = false;
+      lifecycle = "ready";
       ctx.ui.setStatus("sandbox", "🔓 Sandbox: off");
       ctx.ui.notify("Sandbox disabled (user override active)", "warning");
       return;
     }
 
     let config: SandboxConfig;
+    const files: [string, string | null][] = [];
     try {
-      config = loadConfig(ctx.cwd);
+      config = loadConfig(ctx.cwd, files);
     } catch (err) {
       sandboxEnabled = false;
+      lifecycle = "failed";
       ctx.ui.setStatus("sandbox", "🔓 Sandbox: off");
       ctx.ui.notify(
         `Sandbox config error — sandbox disabled: ${err instanceof Error ? err.message : err}`,
@@ -758,6 +961,7 @@ export default function (pi: ExtensionAPI) {
 
     if (!config.enabled) {
       sandboxEnabled = false;
+      lifecycle = "ready";
       ctx.ui.setStatus("sandbox", "🔓 Sandbox: off");
       ctx.ui.notify("Sandbox disabled via config", "warning");
       return;
@@ -766,12 +970,18 @@ export default function (pi: ExtensionAPI) {
     const platform = process.platform;
     if (platform !== "darwin" && platform !== "linux") {
       sandboxEnabled = false;
+      lifecycle = "ready";
       ctx.ui.setStatus("sandbox", "🔓 Sandbox: off");
       ctx.ui.notify(`Sandbox not supported on ${platform}`, "warning");
       return;
     }
 
     try {
+      const cwd = canonicalCwd(ctx.cwd);
+      const capturedConfig = structuredClone(config);
+      const env = environment();
+      if (digest(loadConfig(ctx.cwd)) !== digest(config))
+        throw new Error("Sandbox configuration changed during initialization");
       const configExt = config as unknown as {
         ignoreViolations?: Record<string, string[]>;
         enableWeakerNestedSandbox?: boolean;
@@ -780,13 +990,26 @@ export default function (pi: ExtensionAPI) {
 
       // allowedDomains intentionally omitted from network config → runtime proxy
       // not injected → unrestricted network. Filesystem isolation still applies.
-      await SandboxManager.initialize({
-        network: config.network as any,
-        filesystem: config.filesystem,
-        ignoreViolations: configExt.ignoreViolations,
-        enableWeakerNestedSandbox: configExt.enableWeakerNestedSandbox,
-        enableWeakerNetworkIsolation: configExt.enableWeakerNetworkIsolation,
+      await serialized(async () => {
+        if (token !== generation) return;
+        await initializeOS({
+          network: config.network as any,
+          filesystem: config.filesystem,
+          ignoreViolations: configExt.ignoreViolations,
+          enableWeakerNestedSandbox: configExt.enableWeakerNestedSandbox,
+          enableWeakerNetworkIsolation: configExt.enableWeakerNetworkIsolation,
+        });
       });
+      if (token !== generation) return;
+      initializedState = {
+        cwd,
+        config: capturedConfig,
+        files,
+        env,
+        managerDigest: digest(SandboxManager.getConfig()),
+      };
+      lifecycle = "ready";
+      generation++;
 
       // Make Node's built-in fetch() honour HTTP_PROXY / HTTPS_PROXY in this
       // process and any child processes that inherit the environment.
@@ -797,7 +1020,8 @@ export default function (pi: ExtensionAPI) {
       const nodeMajor = parseInt(process.versions.node.split(".")[0], 10);
       if (nodeMajor >= 22) {
         const existing = process.env.NODE_OPTIONS ?? "";
-        process.env.NODE_OPTIONS = existing ? `${existing} --use-env-proxy` : "--use-env-proxy";
+        if (!existing.split(/\s+/).includes("--use-env-proxy"))
+          process.env.NODE_OPTIONS = existing ? `${existing} --use-env-proxy` : "--use-env-proxy";
       }
 
       sandboxEnabled = true;
@@ -809,7 +1033,10 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.theme.fg("accent", `🔒 Sandbox: ${writeCount} write paths`),
       );
     } catch (err) {
+      if (token !== generation) return;
+      generation++;
       sandboxEnabled = false;
+      lifecycle = "failed";
       ctx.ui.setStatus("sandbox", "🔓 Sandbox: off");
       ctx.ui.notify(
         `Sandbox initialization failed: ${err instanceof Error ? err.message : err}`,
@@ -821,13 +1048,20 @@ export default function (pi: ExtensionAPI) {
   // ── session_shutdown ────────────────────────────────────────────────────────
 
   pi.on("session_shutdown", async () => {
-    if (sandboxInitialized) {
+    generation++;
+    liveContext = undefined;
+    sessionId = undefined;
+    lifecycle = "idle";
+    initializedState = undefined;
+    sandboxInitialized = false;
+    sandboxEnabled = false;
+    await serialized(async () => {
       try {
         await SandboxManager.reset();
       } catch {
-        // Ignore cleanup errors
+        /* cleanup */
       }
-    }
+    });
   });
 
   // ── /sandbox command ────────────────────────────────────────────────────────
@@ -835,17 +1069,23 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("sandbox-toggle", {
     description: "Toggle sandbox on/off for this session",
     handler: async (_args, ctx) => {
+      mutate();
+      const token = ++generation;
+      lifecycle = "pending";
       if (sandboxEnabled) {
         if (sandboxInitialized) {
           try {
-            await SandboxManager.reset();
+            await serialized(() => SandboxManager.reset());
+            if (token !== generation) return;
           } catch {
             // Ignore cleanup errors
           }
         }
+        if (token !== generation) return;
         sandboxEnabled = false;
         sandboxInitialized = false;
         userDisabled = true;
+        lifecycle = "ready";
         ctx.ui.setStatus("sandbox", "🔓 Sandbox: off");
         ctx.ui.notify("Sandbox disabled", "warning");
         return;
@@ -855,6 +1095,9 @@ export default function (pi: ExtensionAPI) {
       try {
         config = loadConfig(ctx.cwd);
       } catch (err) {
+        if (token !== generation) return;
+        lifecycle = "failed";
+        generation++;
         ctx.ui.notify(
           `Sandbox config error — cannot enable: ${err instanceof Error ? err.message : err}`,
           "error",
@@ -875,13 +1118,18 @@ export default function (pi: ExtensionAPI) {
           enableWeakerNetworkIsolation?: boolean;
         };
 
-        await SandboxManager.initialize({
-          network: config.network as any,
-          filesystem: config.filesystem,
-          ignoreViolations: configExt.ignoreViolations,
-          enableWeakerNestedSandbox: configExt.enableWeakerNestedSandbox,
-          enableWeakerNetworkIsolation: configExt.enableWeakerNetworkIsolation,
-        });
+        await serialized(() =>
+          initializeOS({
+            network: config.network as any,
+            filesystem: config.filesystem,
+            ignoreViolations: configExt.ignoreViolations,
+            enableWeakerNestedSandbox: configExt.enableWeakerNestedSandbox,
+            enableWeakerNetworkIsolation: configExt.enableWeakerNetworkIsolation,
+          }),
+        );
+        if (token !== generation) return;
+        lifecycle = "ready";
+        generation++;
 
         sandboxEnabled = true;
         sandboxInitialized = true;
@@ -894,6 +1142,9 @@ export default function (pi: ExtensionAPI) {
         );
         ctx.ui.notify("Sandbox enabled", "info");
       } catch (err) {
+        if (token !== generation) return;
+        lifecycle = "failed";
+        generation++;
         ctx.ui.notify(
           `Sandbox initialization failed: ${err instanceof Error ? err.message : err}`,
           "error",
