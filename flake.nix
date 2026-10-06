@@ -39,6 +39,11 @@
               pkgs.coreutils
               pkgs.nodejs_22
               pkgs.pnpm
+              pkgs.ripgrep
+            ]
+            ++ nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+              pkgs.bubblewrap
+              pkgs.socat
             ];
           };
 

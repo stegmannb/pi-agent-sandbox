@@ -56,13 +56,10 @@ EXPECTED_DECLARATION = {
     },
     "protectionAudit": {
         "method": "forgejo-owner-api-and-ui",
-        "verifiedAt": None,
-        "verifiedBy": None,
-        "evidence": (
-            "pending Owner-Apply and readback for main, merge, review, checks, "
-            "tags, releases, and packages"
-        ),
-        "reviewDate": "2026-09-30",
+        "verifiedAt": "2026-10-06T14:23:00+02:00",
+        "verifiedBy": "stegmannb",
+        "evidence": "Owner-authorized API readback passed; see HL-0198 and Forgejo GitHub Synchronisation",
+        "reviewDate": "2027-01-06",
         "triggers": ["forgejo-upgrade", "protection-setting-change"],
     },
     "ownerApplyTask": "HL-0081",
@@ -182,14 +179,14 @@ EXPECTED_GATE_COMMANDS = {
     "test": "pnpm run verify",
 }
 EXPECTED_PACKAGE_SCRIPTS = {
-    "fmt": "oxfmt .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mts *.mjs tests/*.mjs src/**/*.ts extensions/**/*.ts test/**/*.ts",
-    "lint": "oxlint .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mjs tests/*.mjs src/**/*.ts extensions/**/*.ts test/**/*.ts",
+    "fmt": "oxfmt .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mts *.mjs tests/*.mjs extensions/**/*.ts test/**/*.ts",
+    "lint": "oxlint .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mjs tests/*.mjs extensions/**/*.ts test/**/*.ts",
     "check": "tsc --noEmit",
     "test": "node --import ./protection-source.mjs --test tests/*.test.mjs",
-    "ci:fmt": "node .forgejo/ci/run-oxc.mjs oxfmt --check .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mts *.mjs tests/*.mjs src/**/*.ts extensions/**/*.ts test/**/*.ts",
-    "ci:lint": "node .forgejo/ci/run-oxc.mjs oxlint .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mjs tests/*.mjs src/**/*.ts extensions/**/*.ts test/**/*.ts",
+    "ci:fmt": "node .forgejo/ci/run-oxc.mjs oxfmt --check .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mts *.mjs tests/*.mjs extensions/**/*.ts test/**/*.ts",
+    "ci:lint": "node .forgejo/ci/run-oxc.mjs oxlint .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mjs tests/*.mjs extensions/**/*.ts test/**/*.ts",
     "ci:check": "pnpm run check",
-    "ci:test": "pnpm run test && node --test test/**/*.test.ts",
+    "ci:test": "pnpm run test && node --test test/oxc-runner.test.ts && pnpm run test:loader && pnpm run test:os",
     "verify": "pnpm run ci:fmt && pnpm run ci:lint && pnpm run ci:check && pnpm run ci:test",
     "test:loader": "node tests/run-loader.mjs && node tests/run-installed.mjs",
     "test:os": "node tests/run-os.mjs",
@@ -368,7 +365,10 @@ def validate_ci_job(name: str, job: Any) -> None:
         raise PolicyError(f"required ci job {name} must fail closed")
     if set(job) != {"runs-on", "timeout-minutes", "container", "steps"}:
         raise PolicyError(f"required ci job {name} shape must be exact")
-    if job.get("runs-on") != ["k8s-executor-small", "amd64"]:
+    if job.get("runs-on") != [
+        "k8s-executor-medium" if name == "test" else "k8s-executor-small",
+        "amd64",
+    ]:
         raise PolicyError(f"ci job {name} must use the approved runner")
     timeout = CI_GATE_SPECS[name][3]
     if job.get("timeout-minutes") != timeout:
@@ -412,6 +412,12 @@ def validate_gate_scripts(root: Path) -> None:
         name: base + f"{PNPM_ENV}\n{PNPM_INSTALL}\n{command}\n"
         for name, command in EXPECTED_GATE_COMMANDS.items()
     }
+    expected["test"] = (
+        base
+        + f"{PNPM_ENV}\n{PNPM_INSTALL}\n"
+        + "pnpm --dir tests/pi-073 install --ignore-workspace --ignore-scripts --frozen-lockfile\n"
+        + "pnpm run verify\n"
+    )
     expected["nix"] = (
         base
         + "nix flake show --all-systems\n"

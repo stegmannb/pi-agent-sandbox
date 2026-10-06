@@ -28,10 +28,10 @@ externalReleaseBoundary:
   taskScope: unchanged
 protectionAudit:
   method: forgejo-owner-api-and-ui
-  verifiedAt: null
-  verifiedBy: null
-  evidence: pending Owner-Apply and readback for main, merge, review, checks, tags, releases, and packages
-  reviewDate: "2026-09-30"
+  verifiedAt: "2026-10-06T14:23:00+02:00"
+  verifiedBy: stegmannb
+  evidence: Owner-authorized API readback passed; see HL-0198 and Forgejo GitHub Synchronisation
+  reviewDate: "2027-01-06"
   triggers:
     - forgejo-upgrade
     - protection-setting-change

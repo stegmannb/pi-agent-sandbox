@@ -124,7 +124,7 @@ jobs:
           bash .forgejo/ci/format.sh
 
   test:
-    runs-on: [k8s-executor-small, amd64]
+    runs-on: [k8s-executor-medium, amd64]
     timeout-minutes: 15
     container:
       image: git.forest-arowana.ts.net/bastian/forgejo-runner-k8s@sha256:f038e4345561f4b0bb82bc31c9f6779394db574287779a437f261b7ec409e826

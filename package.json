@@ -28,16 +28,16 @@
   },
   "homepage": "https://github.com/carderne/pi-sandbox",
   "scripts": {
-    "fmt": "oxfmt .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mts *.mjs tests/*.mjs src/**/*.ts extensions/**/*.ts test/**/*.ts",
-    "lint": "oxlint .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mjs tests/*.mjs src/**/*.ts extensions/**/*.ts test/**/*.ts",
+    "fmt": "oxfmt .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mts *.mjs tests/*.mjs extensions/**/*.ts test/**/*.ts",
+    "lint": "oxlint .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mjs tests/*.mjs extensions/**/*.ts test/**/*.ts",
     "check": "tsc --noEmit",
-    "ci:fmt": "node .forgejo/ci/run-oxc.mjs oxfmt --check .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mts *.mjs tests/*.mjs src/**/*.ts extensions/**/*.ts test/**/*.ts",
-    "ci:lint": "node .forgejo/ci/run-oxc.mjs oxlint .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mjs tests/*.mjs src/**/*.ts extensions/**/*.ts test/**/*.ts",
+    "ci:fmt": "node .forgejo/ci/run-oxc.mjs oxfmt --check .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mts *.mjs tests/*.mjs extensions/**/*.ts test/**/*.ts",
+    "ci:lint": "node .forgejo/ci/run-oxc.mjs oxlint .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mjs tests/*.mjs extensions/**/*.ts test/**/*.ts",
     "ci:check": "pnpm run check",
     "test": "node --import ./protection-source.mjs --test tests/*.test.mjs",
     "test:loader": "node tests/run-loader.mjs && node tests/run-installed.mjs",
     "test:os": "node tests/run-os.mjs",
-    "ci:test": "pnpm run test && node --test test/**/*.test.ts",
+    "ci:test": "pnpm run test && node --test test/oxc-runner.test.ts && pnpm run test:loader && pnpm run test:os",
     "verify": "pnpm run ci:fmt && pnpm run ci:lint && pnpm run ci:check && pnpm run ci:test"
   },
   "dependencies": {

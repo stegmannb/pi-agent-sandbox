@@ -33,11 +33,12 @@ and administrator pushes disabled, one current approval from
 `Bastian/Reviewers`, stale approvals dismissed, unresolved change requests and
 official review requests blocking, all six exact contexts required, and only
 rebase/fast-forward merge paths enabled. Repeat the administrative readback
-after Forgejo upgrades, protection changes, and by 2026-09-30.
+after Forgejo upgrades, protection changes, and by 2027-01-06.
 
 ## GitHub synchronization
 
 An external coordinator publishes canonical Forgejo refs hourly. Incoming GitHub
 commits require a Forgejo import PR, exact-head CI, and current independent review.
 Use fast-forward-only merging for imports. Target CI has no synchronization
-credentials. Both runtime snapshot and sandbox-policy fixtures remain in verify.
+credentials. The current snapshot, native SDK loader, installed-package, and real OS sandbox
+suites all remain required in verify.

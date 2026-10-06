@@ -1,4 +1,5 @@
 self-hosted-runner:
   labels:
     - k8s-executor-small
+    - k8s-executor-medium
     - amd64

@@ -65,7 +65,6 @@ import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSy
 import { homedir } from "node:os";
 import { dirname, join, resolve, isAbsolute } from "node:path";
 import { promisify } from "node:util";
-import { createDefaultConfig, deepMerge, matchesPattern, type SandboxConfig, validateConfig } from "./src/policy.ts";
 import { nativeEntryIsObserved } from "./protection-source.mjs";
 import {
   SNAPSHOT_CHANNEL,
@@ -80,7 +79,7 @@ import {
   type SnapshotResponse,
   type Reason,
 } from "./protection.ts";
-import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
+import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
   type BashOperations,
@@ -94,6 +93,76 @@ const sourceProof = nativeEntryIsObserved(
 )
   ? loadedSources(new URL("./pasa-extension.mjs", import.meta.url).href)
   : undefined;
+
+interface SandboxConfig extends SandboxRuntimeConfig {
+  enabled?: boolean;
+}
+
+/**
+ * Validate a parsed sandbox config object and throw a descriptive error if
+ * any field has the wrong type.  Called after JSON.parse so that structural
+ * issues surface immediately instead of being silently ignored.
+ */
+function validateConfig(raw: unknown, filePath: string): Partial<SandboxConfig> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new Error(
+      `Invalid sandbox config in "${filePath}": expected a JSON object at the top level.`,
+    );
+  }
+
+  const obj = raw as Record<string, unknown>;
+
+  if ("enabled" in obj && typeof obj["enabled"] !== "boolean") {
+    throw new Error(
+      `Invalid sandbox config in "${filePath}": "enabled" must be a boolean, got ${JSON.stringify(obj["enabled"])}.`,
+    );
+  }
+
+  if ("filesystem" in obj) {
+    const fs = obj["filesystem"];
+    if (typeof fs !== "object" || fs === null || Array.isArray(fs)) {
+      throw new Error(`Invalid sandbox config in "${filePath}": "filesystem" must be an object.`);
+    }
+    const fsObj = fs as Record<string, unknown>;
+    for (const key of ["denyRead", "allowRead", "allowWrite", "denyWrite"] as const) {
+      if (key in fsObj && !Array.isArray(fsObj[key])) {
+        throw new Error(
+          `Invalid sandbox config in "${filePath}": "filesystem.${key}" must be an array.`,
+        );
+      }
+      if (Array.isArray(fsObj[key])) {
+        for (const entry of fsObj[key] as unknown[]) {
+          if (typeof entry !== "string") {
+            throw new Error(
+              `Invalid sandbox config in "${filePath}": every entry in "filesystem.${key}" must be a string, got ${JSON.stringify(entry)}.`,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  return raw as Partial<SandboxConfig>;
+}
+
+const DEFAULT_CONFIG: SandboxConfig = {
+  enabled: true,
+  // allowedDomains/deniedDomains intentionally omitted: runtime proxy not
+  // injected → unrestricted network. Unix socket and local-binding rules
+  // are still enforced via the OS profile.
+  network: {
+    allowAllUnixSockets: true,
+    allowLocalBinding: true,
+  } as any,
+  filesystem: {
+    denyRead: ["/Users", "/home"],
+    allowRead: [".", "~/.config", "~/.local", "Library"],
+    allowWrite: [".", "/tmp"],
+    denyWrite: [".env", ".env.*", "*.pem", "*.key"],
+    // Allow reading git config so `git` commands work without prompts.
+    allowGitConfig: true,
+  },
+};
 
 function loadConfig(cwd: string, capturedFiles?: [string, string | null][]): SandboxConfig {
   const projectConfigPath = join(cwd, ".pi", "sandbox.json");
@@ -112,7 +181,75 @@ function loadConfig(cwd: string, capturedFiles?: [string, string | null][]): San
   const globalConfig = readCandidate(globalConfigPath);
   const projectConfig = readCandidate(projectConfigPath);
 
-  return deepMerge(deepMerge(createDefaultConfig(), globalConfig), projectConfig);
+  return deepMerge(deepMerge(DEFAULT_CONFIG, globalConfig), projectConfig);
+}
+
+function deepMerge(base: SandboxConfig, overrides: Partial<SandboxConfig>): SandboxConfig {
+  const result: SandboxConfig = { ...base };
+
+  if (overrides.enabled !== undefined) result.enabled = overrides.enabled;
+  if (overrides.network) {
+    result.network = {
+      // allowedDomains/deniedDomains intentionally omitted → unrestricted network
+      // Scalar/optional fields: override takes precedence, fall back to base
+      allowAllUnixSockets:
+        overrides.network.allowAllUnixSockets ?? base.network?.allowAllUnixSockets,
+      allowLocalBinding: overrides.network.allowLocalBinding ?? base.network?.allowLocalBinding,
+      allowUnixSockets: [
+        ...(base.network?.allowUnixSockets ?? []),
+        ...(overrides.network.allowUnixSockets ?? []),
+      ],
+      allowMachLookup: [
+        ...(base.network?.allowMachLookup ?? []),
+        ...(overrides.network.allowMachLookup ?? []),
+      ],
+      httpProxyPort: overrides.network.httpProxyPort ?? base.network?.httpProxyPort,
+      socksProxyPort: overrides.network.socksProxyPort ?? base.network?.socksProxyPort,
+      mitmProxy: overrides.network.mitmProxy ?? base.network?.mitmProxy,
+      parentProxy: overrides.network.parentProxy ?? base.network?.parentProxy,
+    } as any;
+  }
+  if (overrides.filesystem) {
+    result.filesystem = {
+      denyRead: [...(base.filesystem?.denyRead ?? []), ...(overrides.filesystem.denyRead ?? [])],
+      allowRead: [...(base.filesystem?.allowRead ?? []), ...(overrides.filesystem.allowRead ?? [])],
+      allowWrite: [
+        ...(base.filesystem?.allowWrite ?? []),
+        ...(overrides.filesystem.allowWrite ?? []),
+      ],
+      denyWrite: [...(base.filesystem?.denyWrite ?? []), ...(overrides.filesystem.denyWrite ?? [])],
+      // allowGitConfig: override wins, fall back to base
+      allowGitConfig: overrides.filesystem.allowGitConfig ?? base.filesystem?.allowGitConfig,
+    };
+  }
+
+  const extOverrides = overrides as {
+    ignoreViolations?: Record<string, string[]>;
+    enableWeakerNestedSandbox?: boolean;
+    enableWeakerNetworkIsolation?: boolean;
+    allowBrowserProcess?: boolean;
+  };
+  const extResult = result as {
+    ignoreViolations?: Record<string, string[]>;
+    enableWeakerNestedSandbox?: boolean;
+    enableWeakerNetworkIsolation?: boolean;
+    allowBrowserProcess?: boolean;
+  };
+
+  if (extOverrides.ignoreViolations) {
+    extResult.ignoreViolations = extOverrides.ignoreViolations;
+  }
+  if (extOverrides.enableWeakerNestedSandbox !== undefined) {
+    extResult.enableWeakerNestedSandbox = extOverrides.enableWeakerNestedSandbox;
+  }
+  if (extOverrides.enableWeakerNetworkIsolation !== undefined) {
+    extResult.enableWeakerNetworkIsolation = extOverrides.enableWeakerNetworkIsolation;
+  }
+  if (extOverrides.allowBrowserProcess !== undefined) {
+    extResult.allowBrowserProcess = extOverrides.allowBrowserProcess;
+  }
+
+  return result;
 }
 
 // ── Output analysis ───────────────────────────────────────────────────────────
@@ -125,6 +262,19 @@ function extractBlockedWritePath(output: string): string | null {
 
 // ── Path pattern matching ─────────────────────────────────────────────────────
 
+function matchesPattern(filePath: string, patterns: string[]): boolean {
+  const expanded = filePath.replace(/^~/, homedir());
+  const abs = resolve(expanded);
+  return patterns.some((p) => {
+    const expandedP = p.replace(/^~/, homedir());
+    const absP = resolve(expandedP);
+    if (p.includes("*")) {
+      const escaped = absP.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+      return new RegExp(`^${escaped}$`).test(abs);
+    }
+    return abs === absP || abs.startsWith(absP + "/");
+  });
+}
 
 // ── Config file updaters (Node.js process — not OS-sandboxed) ─────────────────
 
