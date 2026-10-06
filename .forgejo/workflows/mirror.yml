@@ -1,0 +1,71 @@
+name: mirror
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: repository-mirror
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NIX_CONFIG: |
+    experimental-features = nix-command flakes
+    sandbox = false
+
+jobs:
+  sync:
+    runs-on: [k8s-executor-small, amd64]
+    timeout-minutes: 5
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Synchronize selected Git refs in both directions
+        shell: bash
+        env:
+          MIRROR_SSH_KEY: ${{ secrets.TWO_WAY_MIRROR_SSH_KEY }}
+          MIRROR_LEFT_URL: ${{ vars.MIRROR_LEFT_URL }}
+          MIRROR_RIGHT_URL: ${{ vars.MIRROR_RIGHT_URL }}
+          MIRROR_KNOWN_HOSTS: ${{ vars.MIRROR_KNOWN_HOSTS }}
+          MIRROR_BRANCHES: ${{ vars.MIRROR_BRANCHES }}
+          MIRROR_TAGS: ${{ vars.MIRROR_TAGS }}
+        run: |
+          set -euo pipefail
+          : "${MIRROR_SSH_KEY:?Missing mirror SSH secret}"
+          : "${MIRROR_LEFT_URL:?Missing left remote URL}"
+          : "${MIRROR_RIGHT_URL:?Missing right remote URL}"
+          : "${MIRROR_KNOWN_HOSTS:?Missing pinned SSH host keys}"
+          : "${MIRROR_BRANCHES:?Missing branch selection}"
+          : "${MIRROR_TAGS:?Missing tag selection}"
+          ssh_dir="$(mktemp -d)"
+          trap 'rm -rf "$ssh_dir"' EXIT
+          chmod 700 "$ssh_dir"
+          printf '%s\n' "$MIRROR_SSH_KEY" > "$ssh_dir/id_ed25519"
+          chmod 600 "$ssh_dir/id_ed25519"
+          unset MIRROR_SSH_KEY
+          printf '%s\n' "$MIRROR_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          export GIT_SSH_COMMAND="ssh -F /dev/null -i $ssh_dir/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$ssh_dir/known_hosts"
+          git remote add forgejo "$MIRROR_LEFT_URL"
+          git remote add github "$MIRROR_RIGHT_URL"
+          nix shell --inputs-from . nixpkgs#nodejs_22 nixpkgs#git nixpkgs#openssh \
+            --command node --input-type=module --eval '
+              import { spawnSync } from "node:child_process";
+              const branches = JSON.parse(process.env.MIRROR_BRANCHES);
+              const tags = JSON.parse(process.env.MIRROR_TAGS);
+              if (!Array.isArray(branches) || branches.length === 0 || !Array.isArray(tags) ||
+                  [...branches, ...tags].some(pattern => typeof pattern !== "string" || pattern.length === 0)) {
+                throw new Error("Mirror selections must be JSON arrays of nonempty patterns.");
+              }
+              const args = [".forgejo/scripts/sync-mirror.mjs",
+                ...branches.flatMap(pattern => ["--branch", pattern]),
+                ...tags.flatMap(pattern => ["--tag", pattern])];
+              const result = spawnSync(process.execPath, args, { stdio: "inherit" });
+              process.exit(result.status ?? 1);
+            '
