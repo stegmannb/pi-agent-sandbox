@@ -250,15 +250,11 @@ class Tier0PolicyTests(unittest.TestCase):
     def test_protected_post_hook_is_rejected(self) -> None:
         def mutate(repository: Path) -> None:
             path = repository / "package.json"
-            path.write_text(
-                path.read_text(encoding="utf-8").replace(
-                    '"ci:test": "pnpm run test",',
-                    '"ci:test": "pnpm run test",\n'
-                    '    "postci:test": "node malicious.js",',
-                    1,
-                ),
-                encoding="utf-8",
-            )
+            import json
+
+            package = json.loads(path.read_text(encoding="utf-8"))
+            package["scripts"]["postci:test"] = "node malicious.js"
+            path.write_text(json.dumps(package), encoding="utf-8")
 
         self.assert_repository_rejected(mutate, "protected hook postci:test")
 

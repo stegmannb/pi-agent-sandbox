@@ -23,3 +23,7 @@
 /src/ @Bastian/Reviewers
 /test/ @Bastian/Reviewers
 /tsconfig.json @Bastian/Reviewers
+/protection.ts @Bastian/Reviewers
+/protection-source.mjs @Bastian/Reviewers
+/pasa-extension.mjs @Bastian/Reviewers
+/tests/ @Bastian/Reviewers

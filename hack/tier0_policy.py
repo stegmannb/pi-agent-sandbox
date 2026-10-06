@@ -92,19 +92,14 @@ EXPECTED_CODEOWNERS = """* @Bastian/Reviewers
 /src/ @Bastian/Reviewers
 /test/ @Bastian/Reviewers
 /tsconfig.json @Bastian/Reviewers
+/protection.ts @Bastian/Reviewers
+/protection-source.mjs @Bastian/Reviewers
+/pasa-extension.mjs @Bastian/Reviewers
+/tests/ @Bastian/Reviewers
 """
 EXPECTED_NPMRC = "auto-install-peers=false\n"
-EXPECTED_WORKSPACE = """allowBuilds:
-  '@google/genai': true
-  koffi: true
-  protobufjs: true
-onlyBuiltDependencies:
-  - "@google/genai"
-  - koffi
-  - protobufjs
-patchedDependencies:
-  '@anthropic-ai/sandbox-runtime@0.0.52': patches/@anthropic-ai__sandbox-runtime@0.0.52.patch
-"""
+EXPECTED_WORKSPACE = "allowBuilds:\n  '@google/genai': true\n  koffi: true\n  protobufjs: true\nonlyBuiltDependencies:\n  - \"@google/genai\"\n  - koffi\n  - protobufjs\npatchedDependencies:\n  '@anthropic-ai/sandbox-runtime@0.0.52': patches/@anthropic-ai__sandbox-runtime@0.0.52.patch\n  'oxfmt@0.33.0': patches/oxfmt@0.33.0.patch\n  'oxlint@1.59.0': patches/oxlint@1.59.0.patch\n"
+
 EXPECTED_OXC_RUNNER = """import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 
@@ -187,30 +182,19 @@ EXPECTED_GATE_COMMANDS = {
     "test": "pnpm run verify",
 }
 EXPECTED_PACKAGE_SCRIPTS = {
-    "fmt": (
-        "oxfmt .forgejo/ci/run-oxc.mjs "
-        "index.ts src/**/*.ts extensions/**/*.ts test/**/*.ts"
-    ),
-    "lint": (
-        "oxlint .forgejo/ci/run-oxc.mjs "
-        "index.ts src/**/*.ts extensions/**/*.ts test/**/*.ts"
-    ),
+    "fmt": "oxfmt .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mts *.mjs tests/*.mjs src/**/*.ts extensions/**/*.ts test/**/*.ts",
+    "lint": "oxlint .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mjs tests/*.mjs src/**/*.ts extensions/**/*.ts test/**/*.ts",
     "check": "tsc --noEmit",
-    "test": "node --test test/**/*.test.ts",
-    "ci:fmt": (
-        "node .forgejo/ci/run-oxc.mjs oxfmt --check .forgejo/ci/run-oxc.mjs "
-        "index.ts src/**/*.ts extensions/**/*.ts test/**/*.ts"
-    ),
-    "ci:lint": (
-        "node .forgejo/ci/run-oxc.mjs oxlint .forgejo/ci/run-oxc.mjs "
-        "index.ts src/**/*.ts extensions/**/*.ts test/**/*.ts"
-    ),
+    "test": "node --import ./protection-source.mjs --test tests/*.test.mjs",
+    "ci:fmt": "node .forgejo/ci/run-oxc.mjs oxfmt --check .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mts *.mjs tests/*.mjs src/**/*.ts extensions/**/*.ts test/**/*.ts",
+    "ci:lint": "node .forgejo/ci/run-oxc.mjs oxlint .forgejo/ci/run-oxc.mjs index.ts protection.ts *.mjs tests/*.mjs src/**/*.ts extensions/**/*.ts test/**/*.ts",
     "ci:check": "pnpm run check",
-    "ci:test": "pnpm run test",
-    "verify": (
-        "pnpm run ci:fmt && pnpm run ci:lint && pnpm run ci:check && pnpm run ci:test"
-    ),
+    "ci:test": "pnpm run test && node --test test/**/*.test.ts",
+    "verify": "pnpm run ci:fmt && pnpm run ci:lint && pnpm run ci:check && pnpm run ci:test",
+    "test:loader": "node tests/run-loader.mjs && node tests/run-installed.mjs",
+    "test:os": "node tests/run-os.mjs",
 }
+
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 SECRET_CONTEXT_EXPRESSION = re.compile(r"\${{.*?\bsecrets\b.*?}}", re.DOTALL)
 FORBIDDEN_FORGEJO_TEXT = re.compile(
