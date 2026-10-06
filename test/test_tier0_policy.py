@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import shutil
 import tempfile
 import unittest
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
@@ -52,6 +54,45 @@ class Tier0PolicyTests(unittest.TestCase):
 
     def test_repository_satisfies_tier0_contract(self) -> None:
         POLICY.validate_repository(ROOT)
+
+    def validate_pr_event(self, base, head="a" * 40, checkout="a" * 40):
+        with tempfile.TemporaryDirectory() as directory:
+            event_path = Path(directory) / "event.json"
+            event_path.write_text(
+                json.dumps(
+                    {"pull_request": {"base": {"ref": base}, "head": {"sha": head}}}
+                )
+            )
+            with patch.object(POLICY, "git", return_value=checkout):
+                POLICY.validate_event(ROOT, event_path)
+
+    def test_selected_main_and_release_bases_are_accepted(self) -> None:
+        for base in ["main", "release/stable", "release/nested/stable"]:
+            with self.subTest(base=base):
+                self.validate_pr_event(base)
+
+    def test_unselected_and_reserved_bases_are_rejected(self) -> None:
+        for base in [None, "release/", "feature/unselected", "sync/github/import"]:
+            with self.subTest(base=base):
+                with self.assertRaisesRegex(
+                    POLICY.PolicyError, "must target main or release"
+                ):
+                    self.validate_pr_event(base)
+
+    def test_import_event_requires_full_head(self) -> None:
+        with self.assertRaisesRegex(POLICY.PolicyError, "full commit SHA"):
+            self.validate_pr_event("release/stable", head="short")
+
+    def test_import_event_rejects_a_different_checkout(self) -> None:
+        with self.assertRaisesRegex(POLICY.PolicyError, "does not match"):
+            self.validate_pr_event("release/stable", checkout="b" * 40)
+
+    def test_generated_tree_check_cannot_be_removed(self) -> None:
+        def mutate(repository: Path) -> None:
+            path = repository / ".forgejo/ci/test.sh"
+            path.write_text(path.read_text().replace("git diff --exit-code\n", ""))
+
+        self.assert_repository_rejected(mutate, "gate script test must be exact")
 
     def test_release_profile_cannot_be_enabled(self) -> None:
         def mutate(repository: Path) -> None:

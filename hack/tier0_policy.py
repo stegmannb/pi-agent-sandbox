@@ -417,6 +417,7 @@ def validate_gate_scripts(root: Path) -> None:
         + f"{PNPM_ENV}\n{PNPM_INSTALL}\n"
         + "pnpm --dir tests/pi-073 install --ignore-workspace --ignore-scripts --frozen-lockfile\n"
         + "pnpm run verify\n"
+        + "git diff --exit-code\n"
     )
     expected["nix"] = (
         base
@@ -576,8 +577,13 @@ def validate_event(root: Path, event_path: Path) -> None:
     head = pull_request.get("head")
     if not isinstance(base, dict) or not isinstance(head, dict):
         raise PolicyError("pull_request event must contain base and head")
-    if base.get("ref") != "main":
-        raise PolicyError("Tier-0 pull requests must target main")
+    base_ref = base.get("ref")
+    if base_ref != "main" and not (
+        isinstance(base_ref, str)
+        and base_ref.startswith("release/")
+        and len(base_ref) > len("release/")
+    ):
+        raise PolicyError("Tier-0 pull requests must target main or release/*")
     head_sha = head.get("sha")
     if not isinstance(head_sha, str) or not FULL_SHA.fullmatch(head_sha):
         raise PolicyError("pull_request head must be a full commit SHA")
