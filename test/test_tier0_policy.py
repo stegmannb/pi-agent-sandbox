@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
 import shutil
 import tempfile
 import unittest
@@ -90,9 +92,52 @@ class Tier0PolicyTests(unittest.TestCase):
     def test_generated_tree_check_cannot_be_removed(self) -> None:
         def mutate(repository: Path) -> None:
             path = repository / ".forgejo/ci/test.sh"
-            path.write_text(path.read_text().replace("git diff --exit-code\n", ""))
+            path.write_text(path.read_text().replace("git diff --exit-code HEAD\n", ""))
 
         self.assert_repository_rejected(mutate, "gate script test must be exact")
+
+    def test_clean_tree_check_includes_index_and_generated_files(self) -> None:
+        script = (ROOT / ".forgejo/ci/test.sh").read_text().split("verify\n", 1)[1]
+        for case in ["clean", "staged", "untracked", "ignored"]:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                env = {
+                    **os.environ,
+                    "GIT_CONFIG_NOSYSTEM": "1",
+                    "GIT_CONFIG_GLOBAL": "/dev/null",
+                }
+
+                def run_git(*args):
+                    subprocess.run(
+                        ["git", *args],
+                        cwd=root,
+                        env=env,
+                        check=True,
+                        capture_output=True,
+                    )
+
+                run_git("init", "-q")
+                (root / "tracked").write_text("original")
+                (root / ".gitignore").write_text("ignored\n")
+                run_git("add", "tracked", ".gitignore")
+                run_git(
+                    "-c",
+                    "user.name=CI fixture",
+                    "-c",
+                    "user.email=ci@example.invalid",
+                    "commit",
+                    "-qm",
+                    "fixture",
+                )
+                if case == "staged":
+                    (root / "tracked").write_text("generated")
+                    run_git("add", "tracked")
+                elif case in ["untracked", "ignored"]:
+                    (root / case).write_text("generated")
+                result = subprocess.run(
+                    ["bash", "-ec", script], cwd=root, env=env, capture_output=True
+                )
+                self.assertEqual(result.returncode == 0, case in ["clean", "ignored"])
 
     def test_release_profile_cannot_be_enabled(self) -> None:
         def mutate(repository: Path) -> None:

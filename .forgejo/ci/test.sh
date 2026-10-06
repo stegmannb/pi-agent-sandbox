@@ -10,4 +10,5 @@ export npm_config_ignore_scripts npm_config_script_shell
 pnpm install --frozen-lockfile --ignore-scripts
 pnpm --dir tests/pi-073 install --ignore-workspace --ignore-scripts --frozen-lockfile
 pnpm run verify
-git diff --exit-code
+git diff --exit-code HEAD
+test -z "$(git ls-files --others --exclude-standard)"

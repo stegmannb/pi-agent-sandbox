@@ -417,7 +417,7 @@ def validate_gate_scripts(root: Path) -> None:
         + f"{PNPM_ENV}\n{PNPM_INSTALL}\n"
         + "pnpm --dir tests/pi-073 install --ignore-workspace --ignore-scripts --frozen-lockfile\n"
         + "pnpm run verify\n"
-        + "git diff --exit-code\n"
+        + 'git diff --exit-code HEAD\ntest -z "$(git ls-files --others --exclude-standard)"\n'
     )
     expected["nix"] = (
         base
